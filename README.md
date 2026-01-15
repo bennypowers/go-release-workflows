@@ -328,7 +328,7 @@ strategy:
       - platform: linux-arm64
         runner: ubuntu-24.04-arm64
       - platform: darwin-x64
-        runner: macos-13
+        runner: macos-14
       - platform: darwin-arm64
         runner: macos-latest
       - platform: win32-x64
@@ -407,7 +407,7 @@ jobs:
           - platform: linux-arm64
             runner: ubuntu-24.04-arm64
           - platform: darwin-x64
-            runner: macos-13
+            runner: macos-14
           - platform: darwin-arm64
             runner: macos-latest
           - platform: win32-x64

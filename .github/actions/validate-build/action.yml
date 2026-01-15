@@ -12,6 +12,10 @@ inputs:
     description: 'Maximum allowed size difference as percentage (default: 10)'
     required: false
     default: '10'
+  health-check:
+    description: 'Command to run for health check (e.g., "version", "--version"). Binary path is prepended automatically.'
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -22,4 +26,5 @@ runs:
         ${{ github.action_path }}/validate-build.sh \
           '${{ inputs.expected-dir }}' \
           '${{ inputs.actual-dir }}' \
-          --size-tolerance=${{ inputs.size-tolerance }}
+          --size-tolerance=${{ inputs.size-tolerance }} \
+          --health-check='${{ inputs.health-check }}'

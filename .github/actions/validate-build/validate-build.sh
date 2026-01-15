@@ -2,21 +2,26 @@
 set -euo pipefail
 
 # Validate build outputs by comparing two artifact directories
-# Usage: validate-build.sh <expected-dir> <actual-dir> [--size-tolerance=N]
-# Example: validate-build.sh artifacts-old artifacts-new --size-tolerance=10
+# Usage: validate-build.sh <expected-dir> <actual-dir> [options]
+# Example: validate-build.sh artifacts-old artifacts-new --size-tolerance=10 --health-check=version
+#
+# Options:
+#   --size-tolerance=N    Max size difference % (default: 10)
+#   --health-check=CMD    Command to run on native binaries (e.g., "version", "--help")
 #
 # Checks:
 # - Architecture verification via `file` command
-# - File size within tolerance (default: 10%)
-# - Functional test for native binaries (--version or --help)
+# - File size within tolerance
+# - Health check for native binaries (if configured)
 # - File existence
 #
-# Hash comparison removed - different toolchains, timestamps, and build metadata
-# produce different hashes for functionally equivalent binaries.
+# Hash comparison intentionally omitted - different toolchains, timestamps, and
+# build metadata produce different hashes for functionally equivalent binaries.
 
 EXPECTED_DIR="$1"
 ACTUAL_DIR="$2"
 SIZE_TOLERANCE=10  # Default 10% tolerance
+HEALTH_CHECK=""    # Optional health check command
 
 # Parse optional arguments
 shift 2
@@ -24,6 +29,9 @@ for arg in "$@"; do
   case "$arg" in
     --size-tolerance=*)
       SIZE_TOLERANCE="${arg#*=}"
+      ;;
+    --health-check=*)
+      HEALTH_CHECK="${arg#*=}"
       ;;
   esac
 done
@@ -69,6 +77,9 @@ detect_platform() {
 CURRENT_PLATFORM=$(detect_platform)
 echo "Current platform: $CURRENT_PLATFORM"
 echo "Size tolerance: ${SIZE_TOLERANCE}%"
+if [[ -n "$HEALTH_CHECK" ]]; then
+  echo "Health check: $HEALTH_CHECK"
+fi
 echo ""
 
 # Get all files from expected directory
@@ -167,26 +178,33 @@ for expected_file in $EXPECTED_FILES; do
     echo "  Architecture: $actual_type ✓"
   fi
 
-  # Functional test for native binaries
-  is_native=false
-  case "$filename" in
-    *"$CURRENT_PLATFORM"*)
-      is_native=true
-      ;;
-  esac
+  # Health check for native binaries (if configured)
+  if [[ -n "$HEALTH_CHECK" && "$arch_ok" == "true" ]]; then
+    is_native=false
+    case "$filename" in
+      *"$CURRENT_PLATFORM"*)
+        is_native=true
+        ;;
+    esac
 
-  if [[ "$is_native" == "true" && "$arch_ok" == "true" ]]; then
-    chmod +x "$actual_file"
-    echo "  Running functional test..."
+    if [[ "$is_native" == "true" ]]; then
+      chmod +x "$actual_file"
+      echo "  Running health check: $actual_file $HEALTH_CHECK"
 
-    # Try --version first, fall back to --help
-    if output=$("$actual_file" --version 2>&1); then
-      echo "  Functional test (--version): ✓"
-      echo "    Output: ${output:0:100}..."
-    elif output=$("$actual_file" --help 2>&1); then
-      echo "  Functional test (--help): ✓"
-    else
-      log_error "$filename: functional test failed - binary crashed or returned error"
+      # shellcheck disable=SC2086 # Intentional word splitting for multi-arg commands
+      if output=$("$actual_file" $HEALTH_CHECK 2>&1); then
+        # Truncate output for display
+        output_display="${output:0:100}"
+        if [[ ${#output} -gt 100 ]]; then
+          output_display="${output_display}..."
+        fi
+        echo "  Health check: ✓"
+        echo "    Output: $output_display"
+      else
+        exit_code=$?
+        log_error "$filename: health check failed (exit code $exit_code)"
+        echo "    Output: ${output:0:200}"
+      fi
     fi
   fi
 

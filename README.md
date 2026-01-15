@@ -287,12 +287,13 @@ Compare two sets of build artifacts for consistency (architecture, size, functio
     expected-dir: artifacts-old    # Reference binaries
     actual-dir: artifacts-new      # New binaries to validate
     size-tolerance: '10'           # Max size difference % (default: 10)
+    health-check: 'version'        # Command to verify binary works (optional)
 ```
 
 Checks performed:
 - Architecture verification via `file` command (ELF x86-64, ARM aarch64, Mach-O, PE32+)
 - File size within tolerance (default 10%)
-- Functional test for native binaries (runs `--version` or `--help`)
+- Health check for native binaries (if configured) - runs `<binary> <health-check>`
 - File existence
 
 Hash comparison is intentionally omitted - different toolchains, timestamps, and build metadata produce different hashes for functionally equivalent binaries.
@@ -363,10 +364,11 @@ jobs:
         with:
           expected-dir: expected
           actual-dir: actual
-          size-tolerance: '5'  # Stricter tolerance for migration validation
+          size-tolerance: '5'    # Stricter tolerance for migration validation
+          health-check: 'version'  # Verify binary runs (use your CLI's command)
 ```
 
-Run this workflow to verify binaries are architecturally correct and similar in size, then switch to the new workflow for releases.
+Run this workflow to verify binaries are architecturally correct, similar in size, and functional, then switch to the new workflow for releases.
 
 ## Windows Cross-Compilation
 

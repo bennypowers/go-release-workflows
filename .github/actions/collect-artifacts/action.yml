@@ -1,0 +1,22 @@
+name: Collect Artifacts
+description: Collect artifact info as JSON for workflow output
+
+inputs:
+  platforms:
+    description: 'JSON array of platforms'
+    required: true
+  binary-name:
+    description: 'Name of the binary'
+    required: true
+
+outputs:
+  artifacts:
+    description: 'JSON array of built artifacts with platform, artifact-name, and path'
+    value: ${{ steps.collect.outputs.artifacts }}
+
+runs:
+  using: composite
+  steps:
+    - id: collect
+      run: ${{ github.action_path }}/collect-artifacts.sh '${{ inputs.platforms }}' '${{ inputs.binary-name }}'
+      shell: bash

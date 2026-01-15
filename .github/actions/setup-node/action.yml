@@ -1,0 +1,60 @@
+name: Setup Node.js
+description: Setup Node.js with smart version detection (checks .nvmrc, .node-version, package.json, or falls back to default)
+
+inputs:
+  node-version:
+    description: 'Fallback Node.js version if no version file found'
+    required: false
+    default: 'lts/*'
+  registry-url:
+    description: 'Registry URL for npm publishing'
+    required: false
+    default: ''
+
+outputs:
+  node-version:
+    description: 'The Node.js version that was installed'
+    value: ${{ steps.setup.outputs.node-version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Detect node version file
+      id: detect
+      shell: bash
+      run: |
+        if [[ -f .nvmrc ]]; then
+          echo "file=.nvmrc" >> "$GITHUB_OUTPUT"
+          echo "Found .nvmrc"
+        elif [[ -f .node-version ]]; then
+          echo "file=.node-version" >> "$GITHUB_OUTPUT"
+          echo "Found .node-version"
+        elif [[ -f package.json ]] && jq -e '.engines.node' package.json &>/dev/null; then
+          echo "file=package.json" >> "$GITHUB_OUTPUT"
+          echo "Found engines.node in package.json"
+        else
+          echo "version=${{ inputs.node-version }}" >> "$GITHUB_OUTPUT"
+          echo "No version file found, using default: ${{ inputs.node-version }}"
+        fi
+
+    - name: Setup Node.js (from file)
+      if: steps.detect.outputs.file != ''
+      uses: actions/setup-node@v4
+      id: setup-file
+      with:
+        node-version-file: ${{ steps.detect.outputs.file }}
+        registry-url: ${{ inputs.registry-url }}
+
+    - name: Setup Node.js (from version)
+      if: steps.detect.outputs.file == ''
+      uses: actions/setup-node@v4
+      id: setup-version
+      with:
+        node-version: ${{ steps.detect.outputs.version }}
+        registry-url: ${{ inputs.registry-url }}
+
+    - name: Set output
+      id: setup
+      shell: bash
+      run: |
+        echo "node-version=$(node --version)" >> "$GITHUB_OUTPUT"

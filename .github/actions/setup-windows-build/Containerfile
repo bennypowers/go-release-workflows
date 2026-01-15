@@ -1,0 +1,26 @@
+FROM fedora:43
+
+ENV LLVM_MINGW_VERSION=20250613
+ENV LLVM_MINGW_DISTRO=ubuntu-22.04
+ENV CGO_ENABLED=1
+ENV PATH="/opt/llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-${LLVM_MINGW_DISTRO}-x86_64/bin:${PATH}"
+
+RUN dnf install -y golang mingw64-gcc mingw64-binutils mingw64-crt mingw64-headers curl tar
+
+RUN curl -LO https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_VERSION}/llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-${LLVM_MINGW_DISTRO}-x86_64.tar.xz && \
+    tar -xJf llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-${LLVM_MINGW_DISTRO}-x86_64.tar.xz -C /opt && \
+    rm llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-${LLVM_MINGW_DISTRO}-x86_64.tar.xz
+
+WORKDIR /app
+
+# Build based on GOARCH and BINARY_NAME env vars
+# Project's Makefile mounts source and calls: podman run -e GOARCH=arm64 -e BINARY_NAME=foo <image>
+CMD ["sh", "-c", "\
+  mkdir -p dist/bin && \
+  if [ \"$GOARCH\" = \"arm64\" ]; then \
+    export CC=aarch64-w64-mingw32-clang; \
+  else \
+    export CC=x86_64-w64-mingw32-gcc; \
+  fi && \
+  go build -ldflags='-s -w' -o dist/bin/${BINARY_NAME:-app}-windows-${GOARCH}.exe . \
+"]

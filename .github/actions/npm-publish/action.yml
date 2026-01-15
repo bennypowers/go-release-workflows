@@ -1,0 +1,14 @@
+name: npm Publish
+description: Publish npm package with idempotency (skip if already published)
+
+inputs:
+  working-directory:
+    description: 'Directory containing package.json'
+    required: false
+    default: '.'
+
+runs:
+  using: composite
+  steps:
+    - run: ${{ github.action_path }}/npm-publish.sh '${{ inputs.working-directory }}'
+      shell: bash

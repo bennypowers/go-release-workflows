@@ -1,0 +1,225 @@
+name: Build Binaries
+
+on:
+  workflow_call:
+    inputs:
+      binary-name:
+        description: 'Name of the binary (used for output path validation)'
+        required: true
+        type: string
+      platforms:
+        description: 'JSON array of platforms to build'
+        required: false
+        type: string
+        default: '["linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64", "win32-x64", "win32-arm64"]'
+      release-tag:
+        description: 'GitHub release tag to upload to (empty = artifacts only)'
+        required: false
+        type: string
+        default: ''
+    outputs:
+      artifacts:
+        description: 'JSON array of built artifacts'
+        value: ${{ jobs.aggregate.outputs.artifacts }}
+
+jobs:
+  validate:
+    name: Validate Makefile Contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: bennypowers/go-release-workflows/.github/actions/validate-makefile@main
+        with:
+          platforms: ${{ inputs.platforms }}
+          binary-name: ${{ inputs.binary-name }}
+
+  build-linux:
+    name: Build Linux
+    needs: validate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(inputs.platforms) }}
+        exclude:
+          - platform: darwin-x64
+          - platform: darwin-arm64
+          - platform: win32-x64
+          - platform: win32-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install cross-compilers
+        if: matrix.platform == 'linux-arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build ${{ matrix.platform }}
+        run: make ${{ matrix.platform }}
+
+      - uses: bennypowers/go-release-workflows/.github/actions/validate-output@main
+        with:
+          binary-name: ${{ inputs.binary-name }}
+          platform: ${{ matrix.platform }}
+
+      - name: Upload to release
+        if: inputs.release-tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload '${{ inputs.release-tag }}' \
+            'dist/bin/${{ inputs.binary-name }}-${{ matrix.platform }}' \
+            --clobber
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.binary-name }}-${{ matrix.platform }}
+          path: dist/bin/${{ inputs.binary-name }}-${{ matrix.platform }}
+          retention-days: 7
+
+  build-darwin:
+    name: Build macOS
+    needs: validate
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(inputs.platforms) }}
+        exclude:
+          - platform: linux-x64
+          - platform: linux-arm64
+          - platform: win32-x64
+          - platform: win32-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build ${{ matrix.platform }}
+        run: make ${{ matrix.platform }}
+
+      - uses: bennypowers/go-release-workflows/.github/actions/validate-output@main
+        with:
+          binary-name: ${{ inputs.binary-name }}
+          platform: ${{ matrix.platform }}
+
+      - name: Upload to release
+        if: inputs.release-tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload '${{ inputs.release-tag }}' \
+            'dist/bin/${{ inputs.binary-name }}-${{ matrix.platform }}' \
+            --clobber
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.binary-name }}-${{ matrix.platform }}
+          path: dist/bin/${{ inputs.binary-name }}-${{ matrix.platform }}
+          retention-days: 7
+
+  build-windows:
+    name: Build Windows
+    needs: validate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(inputs.platforms) }}
+        exclude:
+          - platform: linux-x64
+          - platform: linux-arm64
+          - platform: darwin-x64
+          - platform: darwin-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: bennypowers/go-release-workflows/.github/actions/setup-windows-build@main
+
+      - name: Build ${{ matrix.platform }}
+        run: make ${{ matrix.platform }}
+
+      - uses: bennypowers/go-release-workflows/.github/actions/validate-output@main
+        with:
+          binary-name: ${{ inputs.binary-name }}
+          platform: ${{ matrix.platform }}
+          windows: 'true'
+
+      - name: Upload to release
+        if: inputs.release-tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload '${{ inputs.release-tag }}' \
+            'dist/bin/${{ inputs.binary-name }}-${{ matrix.platform }}.exe' \
+            --clobber
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.binary-name }}-${{ matrix.platform }}
+          path: dist/bin/${{ inputs.binary-name }}-${{ matrix.platform }}.exe
+          retention-days: 7
+
+  aggregate:
+    name: Aggregate Results
+    needs:
+      - build-linux
+      - build-darwin
+      - build-windows
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      artifacts: ${{ steps.collect.outputs.artifacts }}
+    steps:
+      - uses: bennypowers/go-release-workflows/.github/actions/collect-artifacts@main
+        id: collect
+        with:
+          platforms: ${{ inputs.platforms }}
+          binary-name: ${{ inputs.binary-name }}
+
+      - name: Find existing PR comment
+        if: github.event_name == 'pull_request'
+        uses: peter-evans/find-comment@v3
+        id: find-comment
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '## Build Artifacts'
+
+      - name: Post or update PR comment
+        if: github.event_name == 'pull_request'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            ## Build Artifacts
+
+            | Platform     | Status                                                                 |
+            |--------------|------------------------------------------------------------------------|
+            | linux-x64    | ${{ contains(needs.build-linux.result, 'success') && '✅' || '❌' }}   |
+            | linux-arm64  | ${{ contains(needs.build-linux.result, 'success') && '✅' || '❌' }}   |
+            | darwin-x64   | ${{ contains(needs.build-darwin.result, 'success') && '✅' || '❌' }}  |
+            | darwin-arm64 | ${{ contains(needs.build-darwin.result, 'success') && '✅' || '❌' }}  |
+            | win32-x64    | ${{ contains(needs.build-windows.result, 'success') && '✅' || '❌' }} |
+            | win32-arm64  | ${{ contains(needs.build-windows.result, 'success') && '✅' || '❌' }} |
+
+            [Download artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            *Built from ${{ github.sha }} @ ${{ github.event.pull_request.head.ref }}*
+          edit-mode: replace

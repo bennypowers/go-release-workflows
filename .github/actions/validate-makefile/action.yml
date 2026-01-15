@@ -1,0 +1,16 @@
+name: Validate Makefile
+description: Check that Makefile has required targets for all requested platforms
+
+inputs:
+  platforms:
+    description: 'JSON array of platforms to validate'
+    required: true
+  binary-name:
+    description: 'Name of the binary'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - run: ${{ github.action_path }}/validate-makefile.sh '${{ inputs.platforms }}' '${{ inputs.binary-name }}'
+      shell: bash

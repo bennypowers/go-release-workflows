@@ -1,0 +1,35 @@
+name: Generate Checksums
+description: Generate SHA256 checksums manifest for release artifacts
+
+inputs:
+  artifacts-dir:
+    description: 'Directory containing artifacts to checksum'
+    required: true
+  output-file:
+    description: 'Output file path for checksums'
+    required: false
+    default: 'checksums.txt'
+  upload-to-release:
+    description: 'Release tag to upload checksums to (empty = no upload)'
+    required: false
+    default: ''
+
+outputs:
+  checksums-file:
+    description: 'Path to generated checksums file'
+    value: ${{ inputs.output-file }}
+
+runs:
+  using: composite
+  steps:
+    - id: generate
+      shell: bash
+      run: |
+        UPLOAD_ARGS=""
+        if [[ -n '${{ inputs.upload-to-release }}' ]]; then
+          UPLOAD_ARGS="--upload-to-release '${{ inputs.upload-to-release }}'"
+        fi
+        ${{ github.action_path }}/generate-checksums.sh \
+          '${{ inputs.artifacts-dir }}' \
+          '${{ inputs.output-file }}' \
+          $UPLOAD_ARGS

@@ -1,0 +1,25 @@
+name: Validate Output
+description: Validate that the build produced the expected binary
+
+inputs:
+  binary-name:
+    description: 'Name of the binary'
+    required: true
+  platform:
+    description: 'Target platform'
+    required: true
+  windows:
+    description: 'Set to "true" for Windows binaries (.exe)'
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - run: |
+        if [[ '${{ inputs.windows }}' == 'true' ]]; then
+          ${{ github.action_path }}/validate-output.sh '${{ inputs.binary-name }}' '${{ inputs.platform }}' --windows
+        else
+          ${{ github.action_path }}/validate-output.sh '${{ inputs.binary-name }}' '${{ inputs.platform }}'
+        fi
+      shell: bash

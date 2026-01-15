@@ -1,0 +1,16 @@
+name: Setup Windows Build
+description: Install podman and provide Containerfile for Windows cross-compilation
+
+runs:
+  using: composite
+  steps:
+    - name: Install Podman
+      run: sudo apt-get update && sudo apt-get install -y podman
+      shell: bash
+
+    - name: Copy Containerfile
+      run: |
+        if [[ ! -f Containerfile.windows ]]; then
+          cp "${{ github.action_path }}/Containerfile" Containerfile.windows
+        fi
+      shell: bash

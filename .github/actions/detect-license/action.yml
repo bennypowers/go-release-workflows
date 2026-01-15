@@ -1,0 +1,23 @@
+name: Detect License
+description: Detect repository license via GitHub API
+
+inputs:
+  repository:
+    description: 'Repository in owner/repo format'
+    required: true
+  explicit-license:
+    description: 'Explicit SPDX license identifier (overrides detection)'
+    required: false
+    default: ''
+
+outputs:
+  license:
+    description: 'Detected or explicit SPDX license identifier'
+    value: ${{ steps.detect.outputs.license }}
+
+runs:
+  using: composite
+  steps:
+    - id: detect
+      run: ${{ github.action_path }}/detect-license.sh '${{ inputs.repository }}' '${{ inputs.explicit-license }}'
+      shell: bash

@@ -1,0 +1,39 @@
+name: Generate Platform Package
+description: Generate platform-specific package.json for npm
+
+inputs:
+  binary-name:
+    description: 'Name of the binary'
+    required: true
+  platform:
+    description: 'Target platform'
+    required: true
+  npm-package-name:
+    description: 'Full npm package name (e.g., @scope/myapp)'
+    required: true
+  release-tag:
+    description: 'GitHub release tag'
+    required: true
+  license:
+    description: 'SPDX license identifier'
+    required: true
+  os:
+    description: 'Platform OS (linux, darwin, win32)'
+    required: true
+  cpu:
+    description: 'Platform CPU (x64, arm64)'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - run: |
+        ${{ github.action_path }}/generate-platform-pkg.sh \
+          '${{ inputs.binary-name }}' \
+          '${{ inputs.platform }}' \
+          '${{ inputs.npm-package-name }}' \
+          '${{ inputs.release-tag }}' \
+          '${{ inputs.license }}' \
+          '${{ inputs.os }}' \
+          '${{ inputs.cpu }}'
+      shell: bash

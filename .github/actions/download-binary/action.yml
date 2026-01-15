@@ -1,0 +1,19 @@
+name: Download Binary
+description: Download binary from GitHub release
+
+inputs:
+  binary-name:
+    description: 'Name of the binary'
+    required: true
+  platform:
+    description: 'Target platform'
+    required: true
+  release-tag:
+    description: 'GitHub release tag'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - run: ${{ github.action_path }}/download-binary.sh '${{ inputs.binary-name }}' '${{ inputs.platform }}' '${{ inputs.release-tag }}'
+      shell: bash

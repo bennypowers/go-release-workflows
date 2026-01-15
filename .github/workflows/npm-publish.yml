@@ -1,0 +1,129 @@
+name: Publish to npm
+
+on:
+  workflow_call:
+    inputs:
+      binary-name:
+        required: true
+        type: string
+      npm-package-name:
+        description: 'Full npm package name (e.g., "@pwrs/mappa")'
+        required: true
+        type: string
+      release-tag:
+        required: true
+        type: string
+      npm-dir:
+        description: 'Directory containing main package.json'
+        type: string
+        default: 'npm'
+      license:
+        description: 'SPDX license identifier (defaults to repo license)'
+        type: string
+        default: ''
+      node-version:
+        description: 'Node.js version fallback if no .nvmrc/.node-version/package.json engines.node'
+        type: string
+        default: 'lts/*'
+    secrets:
+      npm-token:
+        required: true
+
+jobs:
+  detect-license:
+    name: Detect License
+    runs-on: ubuntu-latest
+    outputs:
+      license: ${{ steps.license.outputs.license }}
+    steps:
+      - uses: bennypowers/go-release-workflows/.github/actions/detect-license@main
+        id: license
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          repository: ${{ github.repository }}
+          explicit-license: ${{ inputs.license }}
+
+  publish-platforms:
+    name: Publish Platform Package
+    needs: detect-license
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            os: linux
+            cpu: x64
+          - platform: linux-arm64
+            os: linux
+            cpu: arm64
+          - platform: darwin-x64
+            os: darwin
+            cpu: x64
+          - platform: darwin-arm64
+            os: darwin
+            cpu: arm64
+          - platform: win32-x64
+            os: win32
+            cpu: x64
+          - platform: win32-arm64
+            os: win32
+            cpu: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: bennypowers/go-release-workflows/.github/actions/setup-node@main
+        with:
+          node-version: ${{ inputs.node-version }}
+          registry-url: 'https://registry.npmjs.org'
+
+      - uses: bennypowers/go-release-workflows/.github/actions/download-binary@main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          binary-name: ${{ inputs.binary-name }}
+          platform: ${{ matrix.platform }}
+          release-tag: ${{ inputs.release-tag }}
+
+      - uses: bennypowers/go-release-workflows/.github/actions/generate-platform-pkg@main
+        with:
+          binary-name: ${{ inputs.binary-name }}
+          platform: ${{ matrix.platform }}
+          npm-package-name: ${{ inputs.npm-package-name }}
+          release-tag: ${{ inputs.release-tag }}
+          license: ${{ needs.detect-license.outputs.license }}
+          os: ${{ matrix.os }}
+          cpu: ${{ matrix.cpu }}
+
+      - uses: bennypowers/go-release-workflows/.github/actions/npm-publish@main
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.npm-token }}
+        with:
+          working-directory: platforms/${{ inputs.binary-name }}-${{ matrix.platform }}
+
+  publish-main:
+    name: Publish Main Package
+    needs: publish-platforms
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: bennypowers/go-release-workflows/.github/actions/setup-node@main
+        with:
+          node-version: ${{ inputs.node-version }}
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Update version
+        working-directory: ${{ inputs.npm-dir }}
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      - uses: bennypowers/go-release-workflows/.github/actions/npm-publish@main
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.npm-token }}
+        with:
+          working-directory: ${{ inputs.npm-dir }}

@@ -1,0 +1,29 @@
+name: Validate Build
+description: Compare two sets of build artifacts for consistency (hash, size, architecture)
+
+inputs:
+  expected-dir:
+    description: 'Directory containing expected/reference binaries'
+    required: true
+  actual-dir:
+    description: 'Directory containing actual/new binaries to validate'
+    required: true
+  strict:
+    description: 'Fail on hash mismatch (default: warn only)'
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - id: validate
+      shell: bash
+      run: |
+        STRICT_FLAG=""
+        if [[ '${{ inputs.strict }}' == 'true' ]]; then
+          STRICT_FLAG="--strict"
+        fi
+        ${{ github.action_path }}/validate-build.sh \
+          '${{ inputs.expected-dir }}' \
+          '${{ inputs.actual-dir }}' \
+          $STRICT_FLAG

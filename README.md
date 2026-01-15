@@ -10,6 +10,20 @@ Shared GitHub Actions workflows for cross-compiling Go binaries with CGO enabled
 - **PR validation**: Build artifacts with status comments on pull requests
 - **Optional npm publishing**: Platform-specific packages + main wrapper package
 
+## Versioning
+
+For production workflows, pin to a specific tag or commit SHA:
+
+```yaml
+# Recommended: pin to a release tag
+uses: bennypowers/go-release-workflows/.github/workflows/build-binaries.yml@v1.0.0
+
+# Alternative: pin to a commit SHA
+uses: bennypowers/go-release-workflows/.github/workflows/build-binaries.yml@abc123def
+```
+
+Using `@main` is acceptable during development but not recommended for release workflows.
+
 ## Makefile Contract
 
 Your project must provide a Makefile with targets for each platform. The workflow delegates all build logic to your Makefile.
@@ -57,14 +71,19 @@ linux-arm64:
 	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC=aarch64-linux-gnu-gcc \
 		go build $(GO_BUILD_FLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-linux-arm64 .
 
+# Darwin targets require explicit -arch flags for CGO cross-compilation
 darwin-x64:
 	@mkdir -p $(DIST_DIR)
 	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 \
+		CC="clang -arch x86_64" \
+		CGO_CFLAGS="-arch x86_64" CGO_LDFLAGS="-arch x86_64" \
 		go build $(GO_BUILD_FLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-darwin-x64 .
 
 darwin-arm64:
 	@mkdir -p $(DIST_DIR)
 	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
+		CC="clang -arch arm64" \
+		CGO_CFLAGS="-arch arm64" CGO_LDFLAGS="-arch arm64" \
 		go build $(GO_BUILD_FLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-darwin-arm64 .
 
 win32-x64: build-windows-image
@@ -453,6 +472,49 @@ We evaluated [goreleaser-cross](https://github.com/goreleaser/goreleaser-cross) 
 2. **Full control**: Each project owns its build logic in Makefile
 3. **Debuggable**: `make linux-x64` works locally exactly as in CI
 4. **darwin still needs native runners**: Even goreleaser-cross recommends macOS runners for darwin CGO builds
+
+## Cross-Compilation Requirements
+
+### Linux ARM64
+
+The `linux-arm64` target requires the `aarch64-linux-gnu-gcc` cross-compiler:
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install gcc-aarch64-linux-gnu
+
+# Fedora
+sudo dnf install gcc-aarch64-linux-gnu
+
+# macOS (via Homebrew)
+brew install aarch64-elf-gcc
+```
+
+**Note:** CI workflows handle this automatically. Local cross-compilation is optional.
+
+### Darwin (macOS)
+
+Darwin targets must run on a macOS host. When CGO is enabled, explicit `-arch` flags are required for cross-compiling between x64 and ARM64:
+
+```makefile
+darwin-x64:
+	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 \
+		CC="clang -arch x86_64" \
+		CGO_CFLAGS="-arch x86_64" CGO_LDFLAGS="-arch x86_64" \
+		go build ...
+
+darwin-arm64:
+	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
+		CC="clang -arch arm64" \
+		CGO_CFLAGS="-arch arm64" CGO_LDFLAGS="-arch arm64" \
+		go build ...
+```
+
+Without these flags, clang compiles for the host architecture regardless of `GOARCH`.
+
+### Windows
+
+Windows cross-compilation uses a container with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw). The `setup-windows-build` action provides a `Containerfile.windows` that your Makefile should use with podman/docker.
 
 ## Troubleshooting
 

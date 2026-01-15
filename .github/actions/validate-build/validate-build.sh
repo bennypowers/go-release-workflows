@@ -62,7 +62,6 @@ for expected_file in $EXPECTED_FILES; do
   actual_size=$(stat -c%s "$actual_file" 2>/dev/null || stat -f%z "$actual_file")
   expected_hash=$(sha256sum "$expected_file" | awk '{print $1}')
   actual_hash=$(sha256sum "$actual_file" | awk '{print $1}')
-  expected_type=$(file -b "$expected_file")
   actual_type=$(file -b "$actual_file")
 
   # Compare sizes
@@ -89,48 +88,51 @@ for expected_file in $EXPECTED_FILES; do
     log_info "$filename: SHA256 match ✓"
   fi
 
-  # Compare file types (architecture)
-  if [[ "$expected_type" != "$actual_type" ]]; then
-    log_error "$filename: architecture mismatch"
-    echo "  Expected: $expected_type"
-    echo "  Actual:   $actual_type"
-  else
-    echo "  Type: $actual_type ✓"
-  fi
-
   # Verify expected architectures based on filename
+  # (We don't compare full file output since BuildID, section counts, etc. differ between builds)
+  arch_ok=true
   case "$filename" in
     *linux-x64*)
       if [[ ! "$actual_type" =~ "ELF 64-bit".*"x86-64" ]]; then
         log_error "$filename: expected ELF x86-64, got: $actual_type"
+        arch_ok=false
       fi
       ;;
     *linux-arm64*)
       if [[ ! "$actual_type" =~ "ELF 64-bit".*"ARM aarch64" ]]; then
         log_error "$filename: expected ELF ARM aarch64, got: $actual_type"
+        arch_ok=false
       fi
       ;;
     *darwin-x64*)
       if [[ ! "$actual_type" =~ "Mach-O".*"x86_64" ]]; then
         log_error "$filename: expected Mach-O x86_64, got: $actual_type"
+        arch_ok=false
       fi
       ;;
     *darwin-arm64*)
       if [[ ! "$actual_type" =~ "Mach-O".*"arm64" ]]; then
         log_error "$filename: expected Mach-O arm64, got: $actual_type"
+        arch_ok=false
       fi
       ;;
     *win32-x64*.exe)
       if [[ ! "$actual_type" =~ "PE32+".*"x86-64" ]]; then
         log_error "$filename: expected PE32+ x86-64, got: $actual_type"
+        arch_ok=false
       fi
       ;;
     *win32-arm64*.exe)
       if [[ ! "$actual_type" =~ "PE32+".*"Aarch64" ]]; then
         log_error "$filename: expected PE32+ Aarch64, got: $actual_type"
+        arch_ok=false
       fi
       ;;
   esac
+
+  if [[ "$arch_ok" == "true" ]]; then
+    echo "  Architecture: $actual_type ✓"
+  fi
 
   echo ""
 done

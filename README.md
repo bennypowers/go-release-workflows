@@ -290,13 +290,59 @@ Compare two sets of build artifacts for consistency (architecture, size, functio
     health-check: 'version'        # Command to verify binary works (optional)
 ```
 
-Checks performed:
-- Architecture verification via `file` command (ELF x86-64, ARM aarch64, Mach-O, PE32+)
-- File size within tolerance (default 10%)
-- Health check for native binaries (if configured) - runs `<binary> <health-check>`
-- File existence
+#### Inputs
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `expected-dir` | Yes | - | Directory containing reference binaries |
+| `actual-dir` | Yes | - | Directory containing new binaries to validate |
+| `size-tolerance` | No | `10` | Maximum allowed size difference as percentage |
+| `health-check` | No | `""` | Command to run on native binaries (e.g., `version`, `--help`) |
+
+#### Checks performed
+
+- **Architecture verification** via `file` command (ELF x86-64, ARM aarch64, Mach-O, PE32+)
+- **File size** within tolerance (default 10%)
+- **Health check** for native binaries (if configured)
+- **File existence**
 
 Hash comparison is intentionally omitted - different toolchains, timestamps, and build metadata produce different hashes for functionally equivalent binaries.
+
+#### Health check
+
+When `health-check` is set, the action runs the specified command on binaries that match the current runner's platform:
+
+1. Detects current platform (e.g., `linux-x64` on `ubuntu-latest`)
+2. For each binary, checks if filename contains the platform (e.g., `myapp-linux-x64`)
+3. If native, runs: `<binary> <health-check>` (e.g., `./myapp-linux-x64 version`)
+4. Passes if exit code is 0
+
+To run health checks on all platforms, use platform-specific runners in your validation workflow:
+
+```yaml
+strategy:
+  matrix:
+    include:
+      - platform: linux-x64
+        runner: ubuntu-latest
+      - platform: linux-arm64
+        runner: ubuntu-24.04-arm64
+      - platform: darwin-x64
+        runner: macos-13
+      - platform: darwin-arm64
+        runner: macos-latest
+      - platform: win32-x64
+        runner: windows-latest
+      - platform: win32-arm64
+        runner: windows-11-arm64
+runs-on: ${{ matrix.runner }}
+```
+
+#### Cross-platform support
+
+The action works on Linux, macOS, and Windows runners:
+- **Linux/macOS**: Full support (architecture check via `file`, size check, health check)
+- **Windows**: Size check and health check work; architecture check skipped (`file` command unavailable)
 
 ### generate-checksums
 
@@ -329,46 +375,65 @@ on: workflow_dispatch
 
 jobs:
   build-existing:
-    # Your existing build workflow
-    runs-on: ubuntu-latest
+    # Your existing build workflow (per-platform)
+    strategy:
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-latest
+          # ... other platforms
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       # ... existing build steps ...
       - uses: actions/upload-artifact@v4
         with:
-          name: binaries-existing
+          name: existing-${{ matrix.platform }}
           path: dist/bin/
 
   build-new:
     uses: bennypowers/go-release-workflows/.github/workflows/build-binaries.yml@main
     with:
       binary-name: myapp
-      # No release-tag = artifacts only
 
   validate:
     needs: [build-existing, build-new]
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-latest
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm64
+          - platform: darwin-x64
+            runner: macos-13
+          - platform: darwin-arm64
+            runner: macos-latest
+          - platform: win32-x64
+            runner: windows-latest
+          - platform: win32-arm64
+            runner: windows-11-arm64
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: binaries-existing
+          name: existing-${{ matrix.platform }}
           path: expected/
 
       - uses: actions/download-artifact@v4
         with:
-          name: myapp-linux-x64
+          name: myapp-${{ matrix.platform }}
           path: actual/
-      # ... download other platforms ...
 
       - uses: bennypowers/go-release-workflows/.github/actions/validate-build@main
         with:
           expected-dir: expected
           actual-dir: actual
-          size-tolerance: '5'    # Stricter tolerance for migration validation
-          health-check: 'version'  # Verify binary runs (use your CLI's command)
+          size-tolerance: '5'
+          health-check: 'version'  # Runs on native platform
 ```
 
-Run this workflow to verify binaries are architecturally correct, similar in size, and functional, then switch to the new workflow for releases.
+Each platform runs on its native runner, enabling health checks for all 6 platforms.
 
 ## Windows Cross-Compilation
 

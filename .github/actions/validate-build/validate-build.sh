@@ -56,22 +56,39 @@ log_info() {
 # Detect current platform for functional tests
 detect_platform() {
   local os arch
-  os=$(uname -s | tr '[:upper:]' '[:lower:]')
-  arch=$(uname -m)
 
-  case "$os" in
-    linux) os="linux" ;;
-    darwin) os="darwin" ;;
-    *) os="unknown" ;;
-  esac
+  # Handle Windows (MINGW/MSYS from Git Bash)
+  if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
+    os="win32"
+    # Check processor architecture on Windows
+    case "${PROCESSOR_ARCHITECTURE:-unknown}" in
+      AMD64) arch="x64" ;;
+      ARM64) arch="arm64" ;;
+      *) arch="x64" ;;  # Default to x64
+    esac
+  else
+    os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    arch=$(uname -m)
 
-  case "$arch" in
-    x86_64|amd64) arch="x64" ;;
-    aarch64|arm64) arch="arm64" ;;
-    *) arch="unknown" ;;
-  esac
+    case "$os" in
+      linux) os="linux" ;;
+      darwin) os="darwin" ;;
+      *) os="unknown" ;;
+    esac
+
+    case "$arch" in
+      x86_64|amd64) arch="x64" ;;
+      aarch64|arm64) arch="arm64" ;;
+      *) arch="unknown" ;;
+    esac
+  fi
 
   echo "${os}-${arch}"
+}
+
+# Check if 'file' command is available (not on Windows)
+has_file_command() {
+  command -v file &>/dev/null
 }
 
 CURRENT_PLATFORM=$(detect_platform)
@@ -107,10 +124,22 @@ for expected_file in $EXPECTED_FILES; do
     continue
   fi
 
-  # Get file info
-  expected_size=$(stat -c%s "$expected_file" 2>/dev/null || stat -f%z "$expected_file")
-  actual_size=$(stat -c%s "$actual_file" 2>/dev/null || stat -f%z "$actual_file")
-  actual_type=$(file -b "$actual_file")
+  # Get file sizes (cross-platform)
+  if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
+    # Windows (Git Bash) - use wc -c
+    expected_size=$(wc -c < "$expected_file" | tr -d ' ')
+    actual_size=$(wc -c < "$actual_file" | tr -d ' ')
+  else
+    expected_size=$(stat -c%s "$expected_file" 2>/dev/null || stat -f%z "$expected_file")
+    actual_size=$(stat -c%s "$actual_file" 2>/dev/null || stat -f%z "$actual_file")
+  fi
+
+  # Get file type (if available)
+  if has_file_command; then
+    actual_type=$(file -b "$actual_file")
+  else
+    actual_type="(file command not available)"
+  fi
 
   # Compare sizes with tolerance
   if [[ "$expected_size" != "$actual_size" ]]; then
@@ -133,49 +162,53 @@ for expected_file in $EXPECTED_FILES; do
     echo "  Size: $actual_size bytes (exact match)"
   fi
 
-  # Verify expected architectures based on filename
+  # Verify expected architectures based on filename (requires 'file' command)
   arch_ok=true
-  case "$filename" in
-    *linux-x64*)
-      if [[ ! "$actual_type" =~ "ELF 64-bit".*"x86-64" ]]; then
-        log_error "$filename: expected ELF x86-64, got: $actual_type"
-        arch_ok=false
-      fi
-      ;;
-    *linux-arm64*)
-      if [[ ! "$actual_type" =~ "ELF 64-bit".*"ARM aarch64" ]]; then
-        log_error "$filename: expected ELF ARM aarch64, got: $actual_type"
-        arch_ok=false
-      fi
-      ;;
-    *darwin-x64*)
-      if [[ ! "$actual_type" =~ "Mach-O".*"x86_64" ]]; then
-        log_error "$filename: expected Mach-O x86_64, got: $actual_type"
-        arch_ok=false
-      fi
-      ;;
-    *darwin-arm64*)
-      if [[ ! "$actual_type" =~ "Mach-O".*"arm64" ]]; then
-        log_error "$filename: expected Mach-O arm64, got: $actual_type"
-        arch_ok=false
-      fi
-      ;;
-    *win32-x64*.exe)
-      if [[ ! "$actual_type" =~ "PE32+".*"x86-64" ]]; then
-        log_error "$filename: expected PE32+ x86-64, got: $actual_type"
-        arch_ok=false
-      fi
-      ;;
-    *win32-arm64*.exe)
-      if [[ ! "$actual_type" =~ "PE32+".*"Aarch64" ]]; then
-        log_error "$filename: expected PE32+ Aarch64, got: $actual_type"
-        arch_ok=false
-      fi
-      ;;
-  esac
+  if has_file_command; then
+    case "$filename" in
+      *linux-x64*)
+        if [[ ! "$actual_type" =~ "ELF 64-bit".*"x86-64" ]]; then
+          log_error "$filename: expected ELF x86-64, got: $actual_type"
+          arch_ok=false
+        fi
+        ;;
+      *linux-arm64*)
+        if [[ ! "$actual_type" =~ "ELF 64-bit".*"ARM aarch64" ]]; then
+          log_error "$filename: expected ELF ARM aarch64, got: $actual_type"
+          arch_ok=false
+        fi
+        ;;
+      *darwin-x64*)
+        if [[ ! "$actual_type" =~ "Mach-O".*"x86_64" ]]; then
+          log_error "$filename: expected Mach-O x86_64, got: $actual_type"
+          arch_ok=false
+        fi
+        ;;
+      *darwin-arm64*)
+        if [[ ! "$actual_type" =~ "Mach-O".*"arm64" ]]; then
+          log_error "$filename: expected Mach-O arm64, got: $actual_type"
+          arch_ok=false
+        fi
+        ;;
+      *win32-x64*.exe)
+        if [[ ! "$actual_type" =~ "PE32+".*"x86-64" ]]; then
+          log_error "$filename: expected PE32+ x86-64, got: $actual_type"
+          arch_ok=false
+        fi
+        ;;
+      *win32-arm64*.exe)
+        if [[ ! "$actual_type" =~ "PE32+".*"Aarch64" ]]; then
+          log_error "$filename: expected PE32+ Aarch64, got: $actual_type"
+          arch_ok=false
+        fi
+        ;;
+    esac
 
-  if [[ "$arch_ok" == "true" ]]; then
-    echo "  Architecture: $actual_type ✓"
+    if [[ "$arch_ok" == "true" ]]; then
+      echo "  Architecture: $actual_type ✓"
+    fi
+  else
+    echo "  Architecture: (skipped - 'file' command not available)"
   fi
 
   # Health check for native binaries (if configured)
@@ -188,7 +221,8 @@ for expected_file in $EXPECTED_FILES; do
     esac
 
     if [[ "$is_native" == "true" ]]; then
-      chmod +x "$actual_file"
+      # Make executable (not needed on Windows but doesn't hurt)
+      chmod +x "$actual_file" 2>/dev/null || true
       echo "  Running health check: $actual_file $HEALTH_CHECK"
 
       # shellcheck disable=SC2086 # Intentional word splitting for multi-arg commands

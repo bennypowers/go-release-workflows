@@ -108,6 +108,64 @@ build-windows-image:
 	fi
 ```
 
+## Consumer Requirements
+
+### For build-binaries.yml
+
+Your project must have:
+
+1. **Makefile** with the 6 platform targets (see [Makefile Contract](#makefile-contract))
+2. **go.mod** file (Go module)
+3. **Code generation** (optional): If your Makefile targets depend on `generate`, ensure `go generate ./...` works
+
+The workflow runs on GitHub-hosted runners:
+- Linux targets run on `ubuntu-latest`
+- Darwin targets run on `macos-latest` (ARM64) and `macos-14` (x64 via Rosetta)
+- Windows targets run on `ubuntu-latest` using your Makefile's container-based build
+
+### For npm-publish.yml
+
+Your project must have:
+
+1. **npm directory** (default: `npm/`) containing a `package.json` for the main wrapper package
+2. **Main package.json** should include:
+   - `bin` entry pointing to a wrapper script
+   - `optionalDependencies` for platform packages (workflow generates these)
+   - `postinstall` script to install the correct platform binary
+
+Example `npm/package.json`:
+```json
+{
+  "name": "@scope/myapp",
+  "bin": { "myapp": "bin/myapp.js" },
+  "scripts": {
+    "postinstall": "node ./install-platform-binary.js"
+  },
+  "optionalDependencies": {
+    "@scope/myapp-linux-x64": "1.0.0",
+    "@scope/myapp-darwin-arm64": "1.0.0"
+  }
+}
+```
+
+3. **NPM_TOKEN secret** configured in your repository
+
+### For pre-main-publish-script
+
+If your main package has `optionalDependencies` that need version updates before publishing, use the `pre-main-publish-script` input:
+
+```yaml
+npm:
+  uses: bennypowers/go-release-workflows/.github/workflows/npm-publish.yml@main
+  with:
+    binary-name: myapp
+    npm-package-name: "@scope/myapp"
+    release-tag: ${{ github.event.release.tag_name }}
+    pre-main-publish-script: 'node ../scripts/update-versions.js'
+```
+
+The script runs from `npm-dir` with `RELEASE_TAG` environment variable available.
+
 ## Workflows
 
 ### build-binaries.yml

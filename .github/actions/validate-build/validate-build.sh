@@ -2,18 +2,31 @@
 set -euo pipefail
 
 # Validate build outputs by comparing two artifact directories
-# Usage: validate-build.sh <expected-dir> <actual-dir> [--strict]
-# Example: validate-build.sh artifacts-old artifacts-new --strict
+# Usage: validate-build.sh <expected-dir> <actual-dir> [--size-tolerance=N]
+# Example: validate-build.sh artifacts-old artifacts-new --size-tolerance=10
 #
 # Checks:
-# - SHA256 hash match (--strict only)
-# - File size within tolerance (default: exact match)
 # - Architecture verification via `file` command
+# - File size within tolerance (default: 10%)
+# - Functional test for native binaries (--version or --help)
 # - File existence
+#
+# Hash comparison removed - different toolchains, timestamps, and build metadata
+# produce different hashes for functionally equivalent binaries.
 
 EXPECTED_DIR="$1"
 ACTUAL_DIR="$2"
-STRICT="${3:-}"
+SIZE_TOLERANCE=10  # Default 10% tolerance
+
+# Parse optional arguments
+shift 2
+for arg in "$@"; do
+  case "$arg" in
+    --size-tolerance=*)
+      SIZE_TOLERANCE="${arg#*=}"
+      ;;
+  esac
+done
 
 ERRORS=()
 WARNINGS=()
@@ -31,6 +44,32 @@ log_warning() {
 log_info() {
   echo "::notice::$1"
 }
+
+# Detect current platform for functional tests
+detect_platform() {
+  local os arch
+  os=$(uname -s | tr '[:upper:]' '[:lower:]')
+  arch=$(uname -m)
+
+  case "$os" in
+    linux) os="linux" ;;
+    darwin) os="darwin" ;;
+    *) os="unknown" ;;
+  esac
+
+  case "$arch" in
+    x86_64|amd64) arch="x64" ;;
+    aarch64|arm64) arch="arm64" ;;
+    *) arch="unknown" ;;
+  esac
+
+  echo "${os}-${arch}"
+}
+
+CURRENT_PLATFORM=$(detect_platform)
+echo "Current platform: $CURRENT_PLATFORM"
+echo "Size tolerance: ${SIZE_TOLERANCE}%"
+echo ""
 
 # Get all files from expected directory
 if [[ ! -d "$EXPECTED_DIR" ]]; then
@@ -60,36 +99,30 @@ for expected_file in $EXPECTED_FILES; do
   # Get file info
   expected_size=$(stat -c%s "$expected_file" 2>/dev/null || stat -f%z "$expected_file")
   actual_size=$(stat -c%s "$actual_file" 2>/dev/null || stat -f%z "$actual_file")
-  expected_hash=$(sha256sum "$expected_file" | awk '{print $1}')
-  actual_hash=$(sha256sum "$actual_file" | awk '{print $1}')
   actual_type=$(file -b "$actual_file")
 
-  # Compare sizes
+  # Compare sizes with tolerance
   if [[ "$expected_size" != "$actual_size" ]]; then
     size_diff=$((actual_size - expected_size))
-    size_pct=$(awk "BEGIN {printf \"%.2f\", ($size_diff / $expected_size) * 100}")
-    if [[ "$STRICT" == "--strict" ]]; then
-      log_error "$filename: size mismatch (expected: $expected_size, actual: $actual_size, diff: ${size_pct}%)"
-    else
-      log_warning "$filename: size differs by ${size_pct}% (expected: $expected_size, actual: $actual_size)"
+    # Use absolute value for percentage
+    if [[ $size_diff -lt 0 ]]; then
+      size_diff=$((-size_diff))
     fi
-  fi
+    size_pct=$(awk "BEGIN {printf \"%.2f\", ($size_diff / $expected_size) * 100}")
+    size_pct_int=${size_pct%.*}
 
-  # Compare hashes (strict mode only fails, otherwise warns)
-  if [[ "$expected_hash" != "$actual_hash" ]]; then
-    if [[ "$STRICT" == "--strict" ]]; then
-      log_error "$filename: SHA256 mismatch"
-      echo "  Expected: $expected_hash"
-      echo "  Actual:   $actual_hash"
+    if [[ $size_pct_int -gt $SIZE_TOLERANCE ]]; then
+      log_error "$filename: size differs by ${size_pct}% (exceeds ${SIZE_TOLERANCE}% tolerance)"
+      echo "  Expected: $expected_size bytes"
+      echo "  Actual:   $actual_size bytes"
     else
-      log_warning "$filename: SHA256 differs (binaries not byte-identical, but may still be functionally equivalent)"
+      echo "  Size: $actual_size bytes (${size_pct}% difference, within tolerance)"
     fi
   else
-    log_info "$filename: SHA256 match ✓"
+    echo "  Size: $actual_size bytes (exact match)"
   fi
 
   # Verify expected architectures based on filename
-  # (We don't compare full file output since BuildID, section counts, etc. differ between builds)
   arch_ok=true
   case "$filename" in
     *linux-x64*)
@@ -132,6 +165,29 @@ for expected_file in $EXPECTED_FILES; do
 
   if [[ "$arch_ok" == "true" ]]; then
     echo "  Architecture: $actual_type ✓"
+  fi
+
+  # Functional test for native binaries
+  is_native=false
+  case "$filename" in
+    *"$CURRENT_PLATFORM"*)
+      is_native=true
+      ;;
+  esac
+
+  if [[ "$is_native" == "true" && "$arch_ok" == "true" ]]; then
+    chmod +x "$actual_file"
+    echo "  Running functional test..."
+
+    # Try --version first, fall back to --help
+    if output=$("$actual_file" --version 2>&1); then
+      echo "  Functional test (--version): ✓"
+      echo "    Output: ${output:0:100}..."
+    elif output=$("$actual_file" --help 2>&1); then
+      echo "  Functional test (--help): ✓"
+    else
+      log_error "$filename: functional test failed - binary crashed or returned error"
+    fi
   fi
 
   echo ""

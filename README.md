@@ -71,6 +71,7 @@ win32-x64: build-windows-image
 	@mkdir -p $(DIST_DIR)
 	podman run --rm -v $(PWD):/app:Z -w /app \
 		-e GOARCH=amd64 -e BINARY_NAME=$(BINARY_NAME) \
+		-e GOEXPERIMENT=$(GOEXPERIMENT) \
 		$(WINDOWS_CC_IMAGE)
 	@mv $(DIST_DIR)/$(BINARY_NAME)-windows-amd64.exe $(DIST_DIR)/$(BINARY_NAME)-win32-x64.exe
 
@@ -78,6 +79,7 @@ win32-arm64: build-windows-image
 	@mkdir -p $(DIST_DIR)
 	podman run --rm -v $(PWD):/app:Z -w /app \
 		-e GOARCH=arm64 -e BINARY_NAME=$(BINARY_NAME) \
+		-e GOEXPERIMENT=$(GOEXPERIMENT) \
 		$(WINDOWS_CC_IMAGE)
 	@mv $(DIST_DIR)/$(BINARY_NAME)-windows-arm64.exe $(DIST_DIR)/$(BINARY_NAME)-win32-arm64.exe
 
@@ -277,21 +279,23 @@ Installs podman and provides the shared Containerfile for Windows cross-compilat
 
 ### validate-build
 
-Compare two sets of build artifacts for consistency (hash, size, architecture).
+Compare two sets of build artifacts for consistency (architecture, size, functionality).
 
 ```yaml
 - uses: bennypowers/go-release-workflows/.github/actions/validate-build@main
   with:
     expected-dir: artifacts-old    # Reference binaries
     actual-dir: artifacts-new      # New binaries to validate
-    strict: 'false'                # true = fail on hash mismatch, false = warn only
+    size-tolerance: '10'           # Max size difference % (default: 10)
 ```
 
 Checks performed:
-- SHA256 hash comparison (strict mode fails, otherwise warns)
-- File size comparison
 - Architecture verification via `file` command (ELF x86-64, ARM aarch64, Mach-O, PE32+)
-- Expected architecture based on filename pattern
+- File size within tolerance (default 10%)
+- Functional test for native binaries (runs `--version` or `--help`)
+- File existence
+
+Hash comparison is intentionally omitted - different toolchains, timestamps, and build metadata produce different hashes for functionally equivalent binaries.
 
 ### generate-checksums
 
@@ -359,10 +363,10 @@ jobs:
         with:
           expected-dir: expected
           actual-dir: actual
-          strict: 'true'  # Fail if binaries don't match exactly
+          size-tolerance: '5'  # Stricter tolerance for migration validation
 ```
 
-Run this workflow multiple times until validation passes, then switch to the new workflow for releases.
+Run this workflow to verify binaries are architecturally correct and similar in size, then switch to the new workflow for releases.
 
 ## Windows Cross-Compilation
 
@@ -381,6 +385,50 @@ We evaluated [goreleaser-cross](https://github.com/goreleaser/goreleaser-cross) 
 2. **Full control**: Each project owns its build logic in Makefile
 3. **Debuggable**: `make linux-x64` works locally exactly as in CI
 4. **darwin still needs native runners**: Even goreleaser-cross recommends macOS runners for darwin CGO builds
+
+## Troubleshooting
+
+### Binary size mismatches during migration
+
+If `validate-build` reports size differences between existing and new binaries:
+
+1. **Check ldflags consistency**: Ensure all build paths use the same ldflags. The shared workflow uses `-s -w` (strip debug info). Update your existing builds to match:
+   ```makefile
+   GO_BUILD_FLAGS := -ldflags="-s -w"
+   ```
+
+2. **Check GoReleaser config**: If using GoReleaser for existing builds, its ldflags are in `.goreleaser.yaml`, not your Makefile:
+   ```yaml
+   builds:
+     - ldflags:
+         - -s -w
+   ```
+
+3. **Check GOEXPERIMENT**: If your project uses `GOEXPERIMENT` (e.g., `jsonv2`), it must be passed to Windows containers. See the example Makefile above.
+
+### Windows CGO compilation errors
+
+If you see errors like `unknown type name 'sigset_t'` or Linux-specific syscall failures when building Windows binaries, the container is missing `GOOS=windows`. The shared `Containerfile.windows` handles this, but if using a custom Containerfile, ensure it sets:
+
+```dockerfile
+ENV GOOS=windows
+```
+
+### Passing Go environment variables to Windows containers
+
+Windows builds run inside a container, so Go environment variables from your Makefile or shell don't propagate automatically. Pass them explicitly:
+
+```makefile
+win32-x64:
+	podman run --rm -v $(PWD):/app:Z -w /app \
+		-e GOARCH=amd64 \
+		-e BINARY_NAME=$(BINARY_NAME) \
+		-e GOEXPERIMENT=$(GOEXPERIMENT) \
+		-e GOTAGS=$(GOTAGS) \
+		$(WINDOWS_CC_IMAGE)
+```
+
+Common variables to consider: `GOEXPERIMENT`, `GOTAGS`, `CGO_CFLAGS`, `CGO_LDFLAGS`.
 
 ## Claude Prompts
 

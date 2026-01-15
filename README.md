@@ -382,6 +382,92 @@ We evaluated [goreleaser-cross](https://github.com/goreleaser/goreleaser-cross) 
 3. **Debuggable**: `make linux-x64` works locally exactly as in CI
 4. **darwin still needs native runners**: Even goreleaser-cross recommends macOS runners for darwin CGO builds
 
+## Claude Prompts
+
+Copy these prompts to help Claude migrate your project to use these workflows.
+
+### Migrate Existing Project
+
+```
+Migrate this Go project to use bennypowers/go-release-workflows.
+
+Requirements:
+1. Add Makefile targets for: linux-x64, linux-arm64, darwin-x64, darwin-arm64, win32-x64, win32-arm64
+2. Output binaries to dist/bin/<binary-name>-<platform>[.exe]
+3. Windows targets should use podman with Containerfile.windows
+4. Create .github/workflows/release.yml using the shared build-binaries.yml workflow
+5. Create .github/workflows/ci.yml for PR validation (no release-tag = artifacts only)
+
+Binary name: <YOUR_BINARY_NAME>
+npm package (if applicable): <@scope/package-name or "none">
+
+Read the existing Makefile and workflows first, then show me the changes needed.
+```
+
+### Add npm Publishing
+
+```
+Add npm publishing to this project using bennypowers/go-release-workflows.
+
+Requirements:
+1. Create npm/ directory with package.json for the main wrapper package
+2. The main package should have optionalDependencies for all 6 platform packages
+3. Add a postinstall script or bin wrapper that finds and uses the correct platform binary
+4. Update .github/workflows/release.yml to call npm-publish.yml after build-binaries.yml
+
+npm package name: <@scope/package-name>
+Binary name: <YOUR_BINARY_NAME>
+```
+
+### Create Makefile from Scratch
+
+```
+Create a Makefile for cross-compiling this Go project with CGO enabled.
+
+Requirements per bennypowers/go-release-workflows contract:
+- Targets: linux-x64, linux-arm64, darwin-x64, darwin-arm64, win32-x64, win32-arm64
+- Output: dist/bin/<binary-name>-<platform>[.exe]
+- Linux ARM64 uses CC=aarch64-linux-gnu-gcc
+- Windows targets use podman with Containerfile.windows (fetched from shared workflow)
+- Use -ldflags="-s -w" for smaller binaries
+
+Binary name: <YOUR_BINARY_NAME>
+```
+
+### Validate Migration
+
+```
+Create a migration validation workflow to compare outputs from my existing build
+workflow against bennypowers/go-release-workflows before switching.
+
+The workflow should:
+1. Run both builds in parallel (existing and new)
+2. Download all artifacts from both
+3. Use the validate-build action to compare hash, size, and architecture
+4. Use strict mode to fail if binaries don't match exactly
+
+My existing workflow produces binaries at: <path/to/binaries>
+My binary name: <YOUR_BINARY_NAME>
+```
+
+### Debug Build Failure
+
+```
+The build is failing when using bennypowers/go-release-workflows.
+
+Error output:
+<paste error here>
+
+Platform: <which platform failed>
+Binary name: <YOUR_BINARY_NAME>
+
+Check:
+1. Does my Makefile have the correct target name?
+2. Does the output go to dist/bin/<binary-name>-<platform>[.exe]?
+3. For Windows: is Containerfile.windows present or being fetched correctly?
+4. For Linux ARM64: is gcc-aarch64-linux-gnu available?
+```
+
 ## License
 
 GPL-3.0 - See [LICENSE](LICENSE) for details.

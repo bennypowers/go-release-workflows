@@ -192,6 +192,21 @@ jobs:
           platforms: ${{ inputs.platforms }}
           binary-name: ${{ inputs.binary-name }}
 
+      - name: Get artifact download URLs
+        if: github.event_name == 'pull_request'
+        id: artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ARTIFACTS=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --jq '.artifacts[] | "\(.name)=\(.id)"')
+          for line in $ARTIFACTS; do
+            name="${line%%=*}"
+            id="${line#*=}"
+            # Convert artifact name to env-safe format (replace - with _)
+            safe_name=$(echo "$name" | tr '-' '_')
+            echo "${safe_name}_url=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts/${id}" >> "$GITHUB_OUTPUT"
+          done
+
       - name: Find existing PR comment
         if: github.event_name == 'pull_request'
         uses: peter-evans/find-comment@v3
@@ -210,16 +225,11 @@ jobs:
           body: |
             ## Build Artifacts
 
-            | Platform     | Status                                                                 |
-            |--------------|------------------------------------------------------------------------|
-            | linux-x64    | ${{ contains(needs.build-linux.result, 'success') && '✅' || '❌' }}   |
-            | linux-arm64  | ${{ contains(needs.build-linux.result, 'success') && '✅' || '❌' }}   |
-            | darwin-x64   | ${{ contains(needs.build-darwin.result, 'success') && '✅' || '❌' }}  |
-            | darwin-arm64 | ${{ contains(needs.build-darwin.result, 'success') && '✅' || '❌' }}  |
-            | win32-x64    | ${{ contains(needs.build-windows.result, 'success') && '✅' || '❌' }} |
-            | win32-arm64  | ${{ contains(needs.build-windows.result, 'success') && '✅' || '❌' }} |
-
-            [Download artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            | OS | x64 | arm64 |
+            |----|-----|-------|
+            | Linux | ${{ contains(needs.build-linux.result, 'success') && format('[✅]({0})', steps.artifacts.outputs[format('{0}_linux_x64_url', inputs.binary-name)]) || '❌' }} | ${{ contains(needs.build-linux.result, 'success') && format('[✅]({0})', steps.artifacts.outputs[format('{0}_linux_arm64_url', inputs.binary-name)]) || '❌' }} |
+            | macOS | ${{ contains(needs.build-darwin.result, 'success') && format('[✅]({0})', steps.artifacts.outputs[format('{0}_darwin_x64_url', inputs.binary-name)]) || '❌' }} | ${{ contains(needs.build-darwin.result, 'success') && format('[✅]({0})', steps.artifacts.outputs[format('{0}_darwin_arm64_url', inputs.binary-name)]) || '❌' }} |
+            | Windows | ${{ contains(needs.build-windows.result, 'success') && format('[✅]({0})', steps.artifacts.outputs[format('{0}_win32_x64_url', inputs.binary-name)]) || '❌' }} | ${{ contains(needs.build-windows.result, 'success') && format('[✅]({0})', steps.artifacts.outputs[format('{0}_win32_arm64_url', inputs.binary-name)]) || '❌' }} |
 
             *Built from ${{ github.sha }} @ ${{ github.event.pull_request.head.ref }}*
           edit-mode: replace

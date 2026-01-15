@@ -25,6 +25,10 @@ on:
         description: 'Node.js version fallback if no .nvmrc/.node-version/package.json engines.node'
         type: string
         default: 'lts/*'
+      pre-main-publish-script:
+        description: 'Script to run before publishing main package (runs from npm-dir)'
+        type: string
+        default: ''
     secrets:
       npm-token:
         required: true
@@ -113,6 +117,13 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Run pre-publish script
+        if: inputs.pre-main-publish-script != ''
+        working-directory: ${{ inputs.npm-dir }}
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: ${{ inputs.pre-main-publish-script }}
 
       - name: Update version
         working-directory: ${{ inputs.npm-dir }}

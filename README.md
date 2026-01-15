@@ -134,6 +134,7 @@ Publish platform-specific npm packages and a main wrapper package.
 | `npm-dir` | No | `npm` | Directory containing main package.json |
 | `license` | No | Auto-detect | SPDX license identifier (defaults to repo license) |
 | `node-version` | No | `lts/*` | Node.js version fallback (see [setup-node](#setup-node)) |
+| `pre-main-publish-script` | No | `""` | Script to run before publishing main package (runs from npm-dir) |
 
 #### Secrets
 

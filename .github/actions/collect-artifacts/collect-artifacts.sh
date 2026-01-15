@@ -15,7 +15,7 @@ for platform in $(echo "$PLATFORMS" | jq -r '.[]'); do
   EXT=""
   [[ "$platform" == win32-* ]] && EXT=".exe"
 
-  ARTIFACTS=$(echo "$ARTIFACTS" | jq \
+  ARTIFACTS=$(echo "$ARTIFACTS" | jq -c \
     --arg p "$platform" \
     --arg n "${BINARY_NAME}-$platform" \
     --arg f "dist/bin/${BINARY_NAME}-$platform$EXT" \

@@ -17,6 +17,7 @@ WORKDIR /app
 # Project's Makefile mounts source and calls: podman run -e GOARCH=arm64 -e BINARY_NAME=foo <image>
 CMD ["sh", "-c", "\
   mkdir -p dist/bin && \
+  export GOOS=windows && \
   if [ \"$GOARCH\" = \"arm64\" ]; then \
     export CC=aarch64-w64-mingw32-clang; \
   else \

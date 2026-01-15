@@ -23,7 +23,10 @@ runs:
     - id: validate
       shell: bash
       run: |
-        ${{ github.action_path }}/validate-build.sh \
+        # Convert Windows backslashes to forward slashes for Git Bash compatibility
+        ACTION_PATH="${{ github.action_path }}"
+        ACTION_PATH="${ACTION_PATH//\\//}"
+        "${ACTION_PATH}/validate-build.sh" \
           '${{ inputs.expected-dir }}' \
           '${{ inputs.actual-dir }}' \
           --size-tolerance=${{ inputs.size-tolerance }} \

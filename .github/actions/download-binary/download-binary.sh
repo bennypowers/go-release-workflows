@@ -18,3 +18,6 @@ EXT=""
 gh release download "$RELEASE_TAG" \
   --pattern "${BINARY_NAME}-${PLATFORM}${EXT}" \
   --dir "$PLATFORM_DIR"
+
+# Rename to just the binary name; platform info is in the package name
+mv "$PLATFORM_DIR/${BINARY_NAME}-${PLATFORM}${EXT}" "$PLATFORM_DIR/${BINARY_NAME}${EXT}"

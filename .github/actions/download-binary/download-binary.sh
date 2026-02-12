@@ -21,3 +21,7 @@ gh release download "$RELEASE_TAG" \
 
 # Rename to just the binary name; platform info is in the package name
 mv "$PLATFORM_DIR/${BINARY_NAME}-${PLATFORM}${EXT}" "$PLATFORM_DIR/${BINARY_NAME}${EXT}"
+
+# Ensure execute permission survives npm pack/install.
+# gh release download produces 644 since HTTP has no permission metadata.
+[[ -z "$EXT" ]] && chmod +x "$PLATFORM_DIR/${BINARY_NAME}"

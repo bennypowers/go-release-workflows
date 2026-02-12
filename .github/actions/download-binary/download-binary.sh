@@ -13,7 +13,9 @@ PLATFORM_DIR="platforms/${BINARY_NAME}-${PLATFORM}"
 mkdir -p "$PLATFORM_DIR"
 
 EXT=""
-[[ "$PLATFORM" == win32-* ]] && EXT=".exe"
+if [[ "$PLATFORM" == win32-* ]]; then
+  EXT=".exe"
+fi
 
 gh release download "$RELEASE_TAG" \
   --pattern "${BINARY_NAME}-${PLATFORM}${EXT}" \
@@ -24,4 +26,6 @@ mv "$PLATFORM_DIR/${BINARY_NAME}-${PLATFORM}${EXT}" "$PLATFORM_DIR/${BINARY_NAME
 
 # Ensure execute permission survives npm pack/install.
 # gh release download produces 644 since HTTP has no permission metadata.
-[[ -z "$EXT" ]] && chmod +x "$PLATFORM_DIR/${BINARY_NAME}"
+if [[ -z "$EXT" ]]; then
+  chmod +x "$PLATFORM_DIR/${BINARY_NAME}"
+fi

@@ -277,6 +277,8 @@ jobs:
       # No release-tag = artifacts only + PR comment with build status
 ```
 
+PR builds post a comment with download links for each platform binary via [nightly.link](https://nightly.link). To avoid sharing the global API rate limit, install the [nightly.link GitHub App](https://github.com/apps/nightly-link) on your repository. The app is free and gives your repo its own rate limit.
+
 ### Subset of Platforms
 
 ```yaml

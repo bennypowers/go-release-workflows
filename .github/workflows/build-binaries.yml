@@ -27,7 +27,7 @@ jobs:
     name: Validate Makefile Contract
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: bennypowers/go-release-workflows/.github/actions/validate-makefile@main
         with:
@@ -48,9 +48,9 @@ jobs:
           - platform: win32-x64
           - platform: win32-arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -78,7 +78,7 @@ jobs:
             'dist/bin/${{ inputs.binary-name }}-${{ matrix.platform }}' \
             --clobber
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.binary-name }}-${{ matrix.platform }}
           path: dist/bin/${{ inputs.binary-name }}-${{ matrix.platform }}
@@ -98,9 +98,9 @@ jobs:
           - platform: win32-x64
           - platform: win32-arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -122,7 +122,7 @@ jobs:
             'dist/bin/${{ inputs.binary-name }}-${{ matrix.platform }}' \
             --clobber
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.binary-name }}-${{ matrix.platform }}
           path: dist/bin/${{ inputs.binary-name }}-${{ matrix.platform }}
@@ -142,9 +142,9 @@ jobs:
           - platform: darwin-x64
           - platform: darwin-arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -169,7 +169,7 @@ jobs:
             'dist/bin/${{ inputs.binary-name }}-${{ matrix.platform }}.exe' \
             --clobber
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.binary-name }}-${{ matrix.platform }}
           path: dist/bin/${{ inputs.binary-name }}-${{ matrix.platform }}.exe
@@ -194,7 +194,7 @@ jobs:
 
       - name: Find existing PR comment
         if: github.event_name == 'pull_request'
-        uses: peter-evans/find-comment@v3
+        uses: peter-evans/find-comment@v4
         id: find-comment
         with:
           issue-number: ${{ github.event.pull_request.number }}
@@ -203,7 +203,7 @@ jobs:
 
       - name: Post or update PR comment
         if: github.event_name == 'pull_request'
-        uses: peter-evans/create-or-update-comment@v4
+        uses: peter-evans/create-or-update-comment@v5
         with:
           comment-id: ${{ steps.find-comment.outputs.comment-id }}
           issue-number: ${{ github.event.pull_request.number }}

@@ -39,7 +39,7 @@ runs:
 
     - name: Setup Node.js (from file)
       if: steps.detect.outputs.file != ''
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       id: setup-file
       with:
         node-version-file: ${{ steps.detect.outputs.file }}
@@ -47,7 +47,7 @@ runs:
 
     - name: Setup Node.js (from version)
       if: steps.detect.outputs.file == ''
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       id: setup-version
       with:
         node-version: ${{ steps.detect.outputs.version }}

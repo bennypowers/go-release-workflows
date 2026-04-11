@@ -75,7 +75,7 @@ jobs:
             os: win32
             cpu: arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: bennypowers/go-release-workflows/.github/actions/setup-node@main
         with:
@@ -129,7 +129,7 @@ jobs:
     needs: publish-platforms
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: bennypowers/go-release-workflows/.github/actions/setup-node@main
         with:

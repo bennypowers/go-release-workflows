@@ -99,6 +99,7 @@ jobs:
           license: ${{ needs.detect-license.outputs.license }}
           os: ${{ matrix.os }}
           cpu: ${{ matrix.cpu }}
+          repository: ${{ github.repository }}
 
       - name: Verify platform package contents
         run: |

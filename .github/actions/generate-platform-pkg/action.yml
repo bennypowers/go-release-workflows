@@ -23,6 +23,9 @@ inputs:
   cpu:
     description: 'Platform CPU (x64, arm64)'
     required: true
+  repository:
+    description: 'GitHub repository (owner/repo)'
+    required: true
 
 runs:
   using: composite
@@ -35,5 +38,6 @@ runs:
           '${{ inputs.release-tag }}' \
           '${{ inputs.license }}' \
           '${{ inputs.os }}' \
-          '${{ inputs.cpu }}'
+          '${{ inputs.cpu }}' \
+          '${{ inputs.repository }}'
       shell: bash

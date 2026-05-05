@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Generate platform-specific package.json for npm
-# Usage: generate-platform-pkg.sh <binary-name> <platform> <npm-package-name> <release-tag> <license> <os> <cpu>
-# Example: generate-platform-pkg.sh myapp linux-x64 @scope/myapp v1.0.0 MIT linux x64
+# Usage: generate-platform-pkg.sh <binary-name> <platform> <npm-package-name> <release-tag> <license> <os> <cpu> <repository>
+# Example: generate-platform-pkg.sh myapp linux-x64 @scope/myapp v1.0.0 MIT linux x64 owner/repo
 
 BINARY_NAME="$1"
 PLATFORM="$2"
@@ -12,6 +12,7 @@ RELEASE_TAG="$4"
 LICENSE="$5"
 PLATFORM_OS="$6"
 PLATFORM_CPU="$7"
+REPOSITORY="$8"
 
 SCOPE=$(echo "$NPM_PACKAGE_NAME" | grep -oE '^@[^/]+' || echo "")
 VERSION="${RELEASE_TAG#v}"
@@ -31,7 +32,11 @@ cat > "platforms/${BINARY_NAME}-${PLATFORM}/package.json" << EOF
   "cpu": ["$PLATFORM_CPU"],
   "type": "module",
   "files": ["${BINARY_NAME}*"],
-  "license": "$LICENSE"
+  "license": "$LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/${REPOSITORY}"
+  }
 }
 EOF
 

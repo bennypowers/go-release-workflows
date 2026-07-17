@@ -1,5 +1,16 @@
 name: Setup Windows Build
-description: Install podman and provide Containerfile for Windows cross-compilation
+description: Install podman and build Windows cross-compilation container image
+
+inputs:
+  go-version:
+    description: 'Go version to install in the container (e.g. 1.26.4)'
+    required: false
+    default: '1.26.4'
+
+outputs:
+  image:
+    description: 'Container image tag for Windows cross-compilation'
+    value: ${{ steps.build.outputs.image }}
 
 runs:
   using: composite
@@ -13,4 +24,15 @@ runs:
         if [[ ! -f Containerfile.windows ]]; then
           cp "${{ github.action_path }}/Containerfile" Containerfile.windows
         fi
+      shell: bash
+
+    - name: Build container image
+      id: build
+      run: |
+        podman build \
+          --build-arg "GO_VERSION=${{ inputs.go-version }}" \
+          -f Containerfile.windows \
+          -t grw-windows-cross \
+          .
+        echo "image=grw-windows-cross" >> "$GITHUB_OUTPUT"
       shell: bash

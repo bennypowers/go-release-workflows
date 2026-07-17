@@ -7,7 +7,8 @@ Shared GitHub Actions workflows for cross-compiling Go binaries with CGO enabled
 - **Reusable workflows**: `build-binaries.yml` and `npm-publish.yml` use `workflow_call` trigger
 - **Composite actions**: All shell logic extracted to `.sh` scripts in `.github/actions/*/`
 - **Script references**: Use `${{ github.action_path }}/script.sh` pattern
-- **Containerfile**: Embedded in `setup-windows-build` action (not repo root)
+- **Containerfile**: Embedded in `setup-windows-build` action; action builds image with Go version from `go.mod` and exports `image` output
+- **Windows image contract**: Makefiles use `WINDOWS_IMAGE ?= grw-windows-cross`; CI sets it via workflow env var
 
 ## Validation
 

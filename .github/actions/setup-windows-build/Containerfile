@@ -1,11 +1,17 @@
 FROM fedora:43
 
+ARG GO_VERSION=1.26.4
+
 ENV LLVM_MINGW_VERSION=20251216
 ENV LLVM_MINGW_DISTRO=ubuntu-22.04
 ENV CGO_ENABLED=1
-ENV PATH="/opt/llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-${LLVM_MINGW_DISTRO}-x86_64/bin:${PATH}"
+ENV PATH="/usr/local/go/bin:/opt/llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-${LLVM_MINGW_DISTRO}-x86_64/bin:${PATH}"
 
-RUN dnf install -y golang mingw64-gcc mingw64-binutils mingw64-crt mingw64-headers curl tar
+RUN dnf install -y mingw64-gcc mingw64-binutils mingw64-crt mingw64-headers curl tar
+
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tar.gz && \
+    tar -C /usr/local -xzf /tmp/go.tar.gz && \
+    rm /tmp/go.tar.gz
 
 RUN curl -LO https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_VERSION}/llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-${LLVM_MINGW_DISTRO}-x86_64.tar.xz && \
     tar -xJf llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-${LLVM_MINGW_DISTRO}-x86_64.tar.xz -C /opt && \

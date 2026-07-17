@@ -57,55 +57,57 @@ Examples:
 BINARY_NAME := myapp
 DIST_DIR := dist/bin
 GO_BUILD_FLAGS := -ldflags="-s -w"
-WINDOWS_CC_IMAGE := $(BINARY_NAME)-windows-cc
+GO_SOURCES := $(shell find . -name '*.go' -not -path '*/node_modules/*') go.mod go.sum
 
+# CI sets WINDOWS_IMAGE via go-release-workflows; override for local dev
+WINDOWS_IMAGE ?= grw-windows-cross
+
+# File-based targets with PHONY aliases for the workflow contract
 .PHONY: linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64
+linux-x64:    $(DIST_DIR)/$(BINARY_NAME)-linux-x64
+linux-arm64:  $(DIST_DIR)/$(BINARY_NAME)-linux-arm64
+darwin-x64:   $(DIST_DIR)/$(BINARY_NAME)-darwin-x64
+darwin-arm64: $(DIST_DIR)/$(BINARY_NAME)-darwin-arm64
+win32-x64:    $(DIST_DIR)/$(BINARY_NAME)-win32-x64.exe
+win32-arm64:  $(DIST_DIR)/$(BINARY_NAME)-win32-arm64.exe
 
-linux-x64:
+$(DIST_DIR)/$(BINARY_NAME)-linux-x64: $(GO_SOURCES)
 	@mkdir -p $(DIST_DIR)
 	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
-		go build $(GO_BUILD_FLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-linux-x64 .
+		go build $(GO_BUILD_FLAGS) -o $@ .
 
-linux-arm64:
+$(DIST_DIR)/$(BINARY_NAME)-linux-arm64: $(GO_SOURCES)
 	@mkdir -p $(DIST_DIR)
 	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC=aarch64-linux-gnu-gcc \
-		go build $(GO_BUILD_FLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-linux-arm64 .
+		go build $(GO_BUILD_FLAGS) -o $@ .
 
-# Darwin targets require explicit -arch flags for CGO cross-compilation
-darwin-x64:
+$(DIST_DIR)/$(BINARY_NAME)-darwin-x64: $(GO_SOURCES)
 	@mkdir -p $(DIST_DIR)
 	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 \
 		CC="clang -arch x86_64" \
 		CGO_CFLAGS="-arch x86_64" CGO_LDFLAGS="-arch x86_64" \
-		go build $(GO_BUILD_FLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-darwin-x64 .
+		go build $(GO_BUILD_FLAGS) -o $@ .
 
-darwin-arm64:
+$(DIST_DIR)/$(BINARY_NAME)-darwin-arm64: $(GO_SOURCES)
 	@mkdir -p $(DIST_DIR)
 	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
 		CC="clang -arch arm64" \
 		CGO_CFLAGS="-arch arm64" CGO_LDFLAGS="-arch arm64" \
-		go build $(GO_BUILD_FLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-darwin-arm64 .
+		go build $(GO_BUILD_FLAGS) -o $@ .
 
-win32-x64: build-windows-image
+$(DIST_DIR)/$(BINARY_NAME)-win32-x64.exe: $(GO_SOURCES)
 	@mkdir -p $(DIST_DIR)
 	podman run --rm -v $(PWD):/app:Z -w /app \
 		-e GOARCH=amd64 -e BINARY_NAME=$(BINARY_NAME) \
-		-e GOEXPERIMENT=$(GOEXPERIMENT) \
-		$(WINDOWS_CC_IMAGE)
-	@mv $(DIST_DIR)/$(BINARY_NAME)-windows-amd64.exe $(DIST_DIR)/$(BINARY_NAME)-win32-x64.exe
+		$(WINDOWS_IMAGE)
+	@mv $(DIST_DIR)/$(BINARY_NAME)-windows-amd64.exe $@
 
-win32-arm64: build-windows-image
+$(DIST_DIR)/$(BINARY_NAME)-win32-arm64.exe: $(GO_SOURCES)
 	@mkdir -p $(DIST_DIR)
 	podman run --rm -v $(PWD):/app:Z -w /app \
 		-e GOARCH=arm64 -e BINARY_NAME=$(BINARY_NAME) \
-		-e GOEXPERIMENT=$(GOEXPERIMENT) \
-		$(WINDOWS_CC_IMAGE)
-	@mv $(DIST_DIR)/$(BINARY_NAME)-windows-arm64.exe $(DIST_DIR)/$(BINARY_NAME)-win32-arm64.exe
-
-build-windows-image:
-	@if ! podman image exists $(WINDOWS_CC_IMAGE); then \
-		podman build -t $(WINDOWS_CC_IMAGE) -f Containerfile.windows . ; \
-	fi
+		$(WINDOWS_IMAGE)
+	@mv $(DIST_DIR)/$(BINARY_NAME)-windows-arm64.exe $@
 ```
 
 ## Consumer Requirements
@@ -351,11 +353,28 @@ Detection order:
 
 ### setup-windows-build
 
-Installs podman and provides the shared Containerfile for Windows cross-compilation.
+Installs podman, builds the Windows cross-compilation container image with the correct Go version, and outputs the image tag.
 
 ```yaml
 - uses: bennypowers/go-release-workflows/.github/actions/setup-windows-build@main
+  id: windows-setup
+  with:
+    go-version: '1.26.4'  # Extracted from go.mod by the workflow
 ```
+
+#### Inputs
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `go-version` | No | `1.26.4` | Go version to install in the container |
+
+#### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `image` | Container image tag (currently `grw-windows-cross`) |
+
+The workflow passes the image tag to `make` via `WINDOWS_IMAGE` env var. Your Makefile should use `WINDOWS_IMAGE ?= grw-windows-cross`.
 
 ### validate-build
 
@@ -517,12 +536,19 @@ Each platform runs on its native runner, enabling health checks for all 6 platfo
 
 ## Windows Cross-Compilation
 
-Windows builds use a container with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) for ARM64 support and mingw64 for x64. The workflow uses the `setup-windows-build` composite action which:
+Windows builds use a container with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) for ARM64 support and mingw64 for x64. The `setup-windows-build` action:
 
 1. Installs podman
 2. Copies the shared `Containerfile` to `Containerfile.windows` (if not already present)
+3. Builds the container image with the Go version from `go.mod`
+4. Exports the image tag as `WINDOWS_IMAGE` env var
 
-Your Makefile's `win32-*` targets should use podman/docker to build and run this container.
+Your Makefile should declare `WINDOWS_IMAGE ?= grw-windows-cross` and use `$(WINDOWS_IMAGE)` in `podman run` commands. In CI, the workflow sets `WINDOWS_IMAGE` from the action output. For local dev, build the image manually:
+
+```bash
+podman build --build-arg GO_VERSION=1.26.4 \
+  -f path/to/Containerfile -t grw-windows-cross .
+```
 
 ## Why Not GoReleaser?
 
@@ -609,13 +635,15 @@ ENV GOOS=windows
 Windows builds run inside a container, so Go environment variables from your Makefile or shell don't propagate automatically. Pass them explicitly:
 
 ```makefile
-win32-x64:
+$(DIST_DIR)/$(BINARY_NAME)-win32-x64.exe: $(GO_SOURCES)
+	@mkdir -p $(DIST_DIR)
 	podman run --rm -v $(PWD):/app:Z -w /app \
 		-e GOARCH=amd64 \
 		-e BINARY_NAME=$(BINARY_NAME) \
 		-e GOEXPERIMENT=$(GOEXPERIMENT) \
 		-e GOTAGS=$(GOTAGS) \
-		$(WINDOWS_CC_IMAGE)
+		$(WINDOWS_IMAGE)
+	@mv $(DIST_DIR)/$(BINARY_NAME)-windows-amd64.exe $@
 ```
 
 Common variables to consider: `GOEXPERIMENT`, `GOTAGS`, `CGO_CFLAGS`, `CGO_LDFLAGS`.
@@ -630,9 +658,9 @@ Copy these prompts to help Claude migrate your project to use these workflows.
 Migrate this Go project to use bennypowers/go-release-workflows.
 
 Requirements:
-1. Add Makefile targets for: linux-x64, linux-arm64, darwin-x64, darwin-arm64, win32-x64, win32-arm64
+1. Add file-based Makefile targets for each platform with PHONY aliases
 2. Output binaries to dist/bin/<binary-name>-<platform>[.exe]
-3. Windows targets should use podman with Containerfile.windows
+3. Windows targets should use WINDOWS_IMAGE ?= grw-windows-cross (CI provides the image)
 4. Create .github/workflows/release.yml using the shared build-binaries.yml workflow
 5. Create .github/workflows/ci.yml for PR validation (no release-tag = artifacts only)
 
@@ -663,10 +691,10 @@ Binary name: <YOUR_BINARY_NAME>
 Create a Makefile for cross-compiling this Go project with CGO enabled.
 
 Requirements per bennypowers/go-release-workflows contract:
-- Targets: linux-x64, linux-arm64, darwin-x64, darwin-arm64, win32-x64, win32-arm64
+- File-based targets with PHONY aliases: linux-x64, linux-arm64, darwin-x64, darwin-arm64, win32-x64, win32-arm64
 - Output: dist/bin/<binary-name>-<platform>[.exe]
 - Linux ARM64 uses CC=aarch64-linux-gnu-gcc
-- Windows targets use podman with Containerfile.windows (fetched from shared workflow)
+- Windows targets use WINDOWS_IMAGE ?= grw-windows-cross (CI provides the image)
 - Use -ldflags="-s -w" for smaller binaries
 
 Binary name: <YOUR_BINARY_NAME>
@@ -702,7 +730,7 @@ Binary name: <YOUR_BINARY_NAME>
 Check:
 1. Does my Makefile have the correct target name?
 2. Does the output go to dist/bin/<binary-name>-<platform>[.exe]?
-3. For Windows: is Containerfile.windows present or being fetched correctly?
+3. For Windows: is WINDOWS_IMAGE set? Does the container image exist?
 4. For Linux ARM64: is gcc-aarch64-linux-gnu available?
 ```
 

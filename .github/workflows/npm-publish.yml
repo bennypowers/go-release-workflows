@@ -29,13 +29,41 @@ on:
         description: 'Script to run before publishing main package (runs from npm-dir)'
         type: string
         default: ''
+      provenance:
+        description: 'Publish with provenance (requires id-token: write permission in caller)'
+        type: boolean
+        default: false
     secrets:
       npm-token:
-        required: true
+        required: false
 
 jobs:
+  validate-auth:
+    name: Validate Auth Config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require npm-token or provenance
+        env:
+          HAS_TOKEN: ${{ secrets.npm-token != '' }}
+          PROVENANCE: ${{ inputs.provenance }}
+        run: |
+          if [[ "$PROVENANCE" != "true" && "$HAS_TOKEN" != "true" ]]; then
+            echo "::error::Either provenance must be enabled or npm-token secret must be provided"
+            exit 1
+          fi
+
+      - name: Verify OIDC token available
+        if: inputs.provenance
+        run: |
+          if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]]; then
+            echo "::error::Provenance enabled but id-token permission not set in caller workflow"
+            echo "::error::Add 'permissions: { id-token: write }' to the calling workflow"
+            exit 1
+          fi
+
   detect-license:
     name: Detect License
+    needs: validate-auth
     runs-on: ubuntu-latest
     outputs:
       license: ${{ steps.license.outputs.license }}
@@ -101,6 +129,10 @@ jobs:
           cpu: ${{ matrix.cpu }}
           repository: ${{ github.repository }}
 
+      - name: Upgrade npm for provenance support
+        if: inputs.provenance
+        run: npm install -g npm@latest
+
       - name: Verify platform package contents
         run: |
           DIR="platforms/${{ inputs.binary-name }}-${{ matrix.platform }}"
@@ -124,6 +156,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.npm-token }}
         with:
           working-directory: platforms/${{ inputs.binary-name }}-${{ matrix.platform }}
+          provenance: ${{ inputs.provenance }}
 
   publish-main:
     name: Publish Main Package
@@ -152,8 +185,13 @@ jobs:
           VERSION="${RELEASE_TAG#v}"
           npm version "$VERSION" --no-git-tag-version --allow-same-version
 
+      - name: Upgrade npm for provenance support
+        if: inputs.provenance
+        run: npm install -g npm@latest
+
       - uses: bennypowers/go-release-workflows/.github/actions/npm-publish@main
         env:
           NODE_AUTH_TOKEN: ${{ secrets.npm-token }}
         with:
           working-directory: ${{ inputs.npm-dir }}
+          provenance: ${{ inputs.provenance }}

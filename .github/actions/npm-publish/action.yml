@@ -6,9 +6,15 @@ inputs:
     description: 'Directory containing package.json'
     required: false
     default: '.'
+  provenance:
+    description: 'Publish with --provenance (requires OIDC id-token)'
+    required: false
+    default: false
 
 runs:
   using: composite
   steps:
     - run: ${{ github.action_path }}/npm-publish.sh '${{ inputs.working-directory }}'
       shell: bash
+      env:
+        NPM_PROVENANCE: ${{ inputs.provenance }}

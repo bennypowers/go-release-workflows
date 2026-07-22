@@ -10,9 +10,17 @@ WORKING_DIR="${1:-.}"
 
 cd "$WORKING_DIR"
 
+PROVENANCE_FLAG=""
+if [[ "${NPM_PROVENANCE:-false}" == "true" ]]; then
+  PROVENANCE_FLAG="--provenance"
+  if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
+    sed -i '/_authToken/d' "$HOME/.npmrc" 2>/dev/null || true
+  fi
+fi
+
 npm_output=$(mktemp)
 set +e
-npm publish --access public > "$npm_output" 2>&1
+npm publish --access public $PROVENANCE_FLAG > "$npm_output" 2>&1
 exit_code=$?
 set -e
 cat "$npm_output"

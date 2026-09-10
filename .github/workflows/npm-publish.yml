@@ -129,9 +129,10 @@ jobs:
           cpu: ${{ matrix.cpu }}
           repository: ${{ github.repository }}
 
-      - name: Upgrade npm for provenance support
-        if: inputs.provenance
-        run: npm install -g npm@latest
+      # Note: provenance is supported natively by npm 8.3.0+
+      # which ships with all supported Node.js versions (20, 22, 24, 26).
+      # Avoid forcing `npm@latest` which may land on an incompatible major
+      # (e.g., npm@12 requires ^24.15.0, breaking on Node 24.4.0).
 
       - name: Verify platform package contents
         run: |
@@ -184,10 +185,6 @@ jobs:
         run: |
           VERSION="${RELEASE_TAG#v}"
           npm version "$VERSION" --no-git-tag-version --allow-same-version
-
-      - name: Upgrade npm for provenance support
-        if: inputs.provenance
-        run: npm install -g npm@latest
 
       - uses: bennypowers/go-release-workflows/.github/actions/npm-publish@main
         env:

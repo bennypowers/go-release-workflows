@@ -1,0 +1,22 @@
+name: Ensure npm OIDC Support
+description: Install a newer npm CLI when the bundled version is too old for trusted publishing
+
+inputs:
+  minimum-version:
+    description: Minimum npm version required for OIDC trusted publishing
+    required: false
+    default: '11.5.1'
+  install-version:
+    description: npm version range to install when the current version is below the minimum
+    required: false
+    default: '^11.19.1'
+
+runs:
+  using: composite
+  steps:
+    - name: Check npm version
+      shell: bash
+      env:
+        MINIMUM_VERSION: ${{ inputs.minimum-version }}
+        INSTALL_VERSION: ${{ inputs.install-version }}
+      run: ${{ github.action_path }}/ensure-npm-oidc.sh

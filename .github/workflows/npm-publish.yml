@@ -113,6 +113,9 @@ jobs:
           node-version: ${{ inputs.node-version }}
           registry-url: 'https://registry.npmjs.org'
 
+      - uses: bennypowers/go-release-workflows/.github/actions/ensure-npm-oidc@main
+        if: inputs.provenance
+
       - uses: bennypowers/go-release-workflows/.github/actions/download-binary@main
         env:
           GH_TOKEN: ${{ github.token }}
@@ -132,10 +135,10 @@ jobs:
           cpu: ${{ matrix.cpu }}
           repository: ${{ github.repository }}
 
-      # Note: provenance is supported natively by npm 8.3.0+
-      # which ships with all supported Node.js versions (20, 22, 24, 26).
-      # Avoid forcing `npm@latest` which may land on an incompatible major
-      # (e.g., npm@12 requires ^24.15.0, breaking on Node 24.4.0).
+      # Trusted publishing (OIDC authentication without NPM_TOKEN) requires
+      # npm >= 11.5.1. Provenance signing is older, but authentication is not:
+      # npm < 11.5.1 has no OIDC exchange and fails with ENEEDAUTH.
+      # ensure-npm-oidc installs an 11.x npm only when the bundled one is too old.
 
       - name: Verify platform package contents
         run: |
@@ -176,6 +179,9 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
           registry-url: 'https://registry.npmjs.org'
+
+      - uses: bennypowers/go-release-workflows/.github/actions/ensure-npm-oidc@main
+        if: inputs.provenance
 
       - name: Run pre-publish script
         if: inputs.pre-main-publish-script != ''

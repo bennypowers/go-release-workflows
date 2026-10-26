@@ -14,7 +14,9 @@ inputs:
 runs:
   using: composite
   steps:
-    - run: ${{ github.action_path }}/npm-publish.sh '${{ inputs.working-directory }}'
-      shell: bash
-      env:
+    - env:
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
         NPM_PROVENANCE: ${{ inputs.provenance }}
+      run: |
+        "${{ github.action_path }}/npm-publish.sh" "$WORKING_DIRECTORY"
+      shell: bash

@@ -20,6 +20,7 @@ jobs:
 
       - name: Shell tests
         run: |
+          bash test/test-action-safety.sh
           bash test/test-detect-license.sh
           bash test/test-generate-platform-pkg.sh
 

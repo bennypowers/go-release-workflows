@@ -16,6 +16,7 @@ Before committing, run:
 ```bash
 actionlint .github/workflows/*.yml
 shellcheck .github/actions/*/*.sh test/*.sh
+bash test/test-action-safety.sh
 bash test/test-detect-license.sh
 bash test/test-generate-platform-pkg.sh
 ```

@@ -23,5 +23,10 @@ runs:
   using: composite
   steps:
     - id: detect
-      run: ${{ github.action_path }}/detect-license.sh '${{ inputs.repository }}' '${{ inputs.explicit-license }}' '${{ inputs.npm-dir }}'
+      env:
+        REPOSITORY: ${{ inputs.repository }}
+        EXPLICIT_LICENSE: ${{ inputs.explicit-license }}
+        NPM_DIR: ${{ inputs.npm-dir }}
+      run: |
+        "${{ github.action_path }}/detect-license.sh" "$REPOSITORY" "$EXPLICIT_LICENSE" "$NPM_DIR"
       shell: bash

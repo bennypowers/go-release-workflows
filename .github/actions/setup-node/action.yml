@@ -22,6 +22,8 @@ runs:
     - name: Detect node version file
       id: detect
       shell: bash
+      env:
+        NODE_VERSION: ${{ inputs.node-version }}
       run: |
         if [[ -f .nvmrc ]]; then
           echo "file=.nvmrc" >> "$GITHUB_OUTPUT"
@@ -33,8 +35,8 @@ runs:
           echo "file=package.json" >> "$GITHUB_OUTPUT"
           echo "Found engines.node in package.json"
         else
-          echo "version=${{ inputs.node-version }}" >> "$GITHUB_OUTPUT"
-          echo "No version file found, using default: ${{ inputs.node-version }}"
+          echo "version=$NODE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "No version file found, using default: $NODE_VERSION"
         fi
 
     - name: Setup Node.js (from file)

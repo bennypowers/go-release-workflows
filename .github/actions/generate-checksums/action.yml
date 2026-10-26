@@ -24,12 +24,16 @@ runs:
   steps:
     - id: generate
       shell: bash
+      env:
+        ARTIFACTS_DIR: ${{ inputs.artifacts-dir }}
+        OUTPUT_FILE: ${{ inputs.output-file }}
+        UPLOAD_TO_RELEASE: ${{ inputs.upload-to-release }}
       run: |
-        UPLOAD_ARGS=""
-        if [[ -n '${{ inputs.upload-to-release }}' ]]; then
-          UPLOAD_ARGS="--upload-to-release '${{ inputs.upload-to-release }}'"
+        upload_args=()
+        if [[ -n "$UPLOAD_TO_RELEASE" ]]; then
+          upload_args=(--upload-to-release "$UPLOAD_TO_RELEASE")
         fi
-        ${{ github.action_path }}/generate-checksums.sh \
-          '${{ inputs.artifacts-dir }}' \
-          '${{ inputs.output-file }}' \
-          $UPLOAD_ARGS
+        "${{ github.action_path }}/generate-checksums.sh" \
+          "$ARTIFACTS_DIR" \
+          "$OUTPUT_FILE" \
+          "${upload_args[@]}"

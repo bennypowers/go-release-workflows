@@ -28,9 +28,11 @@ runs:
 
     - name: Build container image
       id: build
+      env:
+        GO_VERSION: ${{ inputs.go-version }}
       run: |
         podman build \
-          --build-arg "GO_VERSION=${{ inputs.go-version }}" \
+          --build-arg "GO_VERSION=$GO_VERSION" \
           -f Containerfile.windows \
           -t grw-windows-cross \
           .

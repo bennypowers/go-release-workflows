@@ -15,5 +15,10 @@ inputs:
 runs:
   using: composite
   steps:
-    - run: ${{ github.action_path }}/download-binary.sh '${{ inputs.binary-name }}' '${{ inputs.platform }}' '${{ inputs.release-tag }}'
+    - env:
+        BINARY_NAME: ${{ inputs.binary-name }}
+        PLATFORM: ${{ inputs.platform }}
+        RELEASE_TAG: ${{ inputs.release-tag }}
+      run: |
+        "${{ github.action_path }}/download-binary.sh" "$BINARY_NAME" "$PLATFORM" "$RELEASE_TAG"
       shell: bash

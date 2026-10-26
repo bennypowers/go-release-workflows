@@ -19,7 +19,6 @@ PLATFORM_CPU="$7"
 REPOSITORY="$8"
 LICENSE_FILE="${9:-}"
 
-SCOPE=$(echo "$NPM_PACKAGE_NAME" | grep -oE '^@[^/]+' || echo "")
 VERSION="${RELEASE_TAG#v}"
 
 PLATFORM_DIR="platforms/${BINARY_NAME}-${PLATFORM}"
@@ -38,12 +37,11 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   echo "license-file=$LICENSE_NAME" >> "$GITHUB_OUTPUT"
 fi
 
-# Build package name: scoped (@scope/binary-platform) or unscoped (binary-platform)
-if [[ -n "$SCOPE" ]]; then
-  PKG_NAME="${SCOPE}/${BINARY_NAME}-${PLATFORM}"
-else
-  PKG_NAME="${BINARY_NAME}-${PLATFORM}"
-fi
+# Platform packages are companions to the main npm package, so their names
+# derive from npm-package-name, not from the binary name. This matters when the
+# two differ: a binary named rhds-mcp published as @rhds/mcp must yield
+# @rhds/mcp-linux-x64 so the wrapper's optionalDependencies resolve.
+PKG_NAME="${NPM_PACKAGE_NAME}-${PLATFORM}"
 
 # jq escapes all values so package.json stays valid for any input.
 jq -n \

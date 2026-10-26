@@ -226,6 +226,7 @@ jobs:
         if: inputs.provenance
 
       - uses: bennypowers/go-release-workflows/.github/actions/stage-license@main
+        id: stage
         with:
           npm-dir: ${{ inputs.npm-dir }}
           license-file: ${{ inputs.license-file }}
@@ -244,6 +245,29 @@ jobs:
         run: |
           VERSION="${RELEASE_TAG#v}"
           npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      - name: Verify main package license
+        working-directory: ${{ inputs.npm-dir }}
+        env:
+          LICENSE_FILE: ${{ steps.stage.outputs.license-file }}
+        run: |
+          if [[ -z "$LICENSE_FILE" ]]; then
+            echo "::error::stage-license did not report a license file"
+            exit 1
+          fi
+          # Assert on npm's packlist, as the platform verify step does. npm
+          # auto-includes conventional LICENSE/LICENCE/COPYING names, but a
+          # custom license-file name only ships when the manifest's files list
+          # covers it; without this check the wrapper could publish unlicensed.
+          PACK_JSON="$(npm pack --dry-run --json --ignore-scripts)"
+          PACKED="$(jq -r '.[0].files[].path' <<<"$PACK_JSON")"
+          if ! grep -qxF -- "$LICENSE_FILE" <<<"$PACKED"; then
+            echo "::error::License file '${LICENSE_FILE}' is missing from the main package tarball"
+            echo "Packed files:"
+            printf '%s\n' "$PACKED"
+            exit 1
+          fi
+          echo "✓ Main package includes ${LICENSE_FILE}"
 
       - uses: bennypowers/go-release-workflows/.github/actions/npm-publish@main
         env:

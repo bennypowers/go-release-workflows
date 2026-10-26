@@ -135,6 +135,10 @@ Your project must have:
    - `optionalDependencies` for platform packages (workflow generates these)
    - `postinstall` script to install the correct platform binary
 
+   Platform packages are named `<npm-package-name>-<platform>`, so
+   `@scope/myapp` publishes `@scope/myapp-linux-x64` and so on. The binary name
+   does not affect the package name; it may differ from the npm package name.
+
 Example `npm/package.json`:
 ```json
 {
@@ -230,6 +234,8 @@ License is resolved in this order:
 The `license` field carries details the GitHub API cannot infer, such as `GPL-3.0-or-later` versus `GPL-3.0`, so prefer setting it in `npm-dir/package.json` or passing the input. Empty and `NOASSERTION` values are rejected; there is no MIT default.
 
 Each platform package also receives a real copy (never a symlink) of the repository license file, located by `license-file` or conventional names (`LICENSE`, `LICENSE.md`, `LICENCE`, `COPYING`, and variants). The main package receives the same copy before publishing. When more than one license file exists (for example a dual-licensed project), the workflow fails instead of guessing: pass `license-file` to choose. The build fails if no license file is found.
+
+Before publishing, the workflow inspects npm's own packlist (`npm pack --dry-run`) for every platform package and for the main package. A license file that would not ship (for example a custom name excluded by the manifest's `files` list) fails the build instead of producing a non-compliant tarball.
 
 #### Secrets
 

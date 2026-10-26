@@ -168,6 +168,19 @@ else
   fail "npm-dir '.' should read the root package.json license (status=$STATUS out=$(cat "$OUT"))"
 fi
 
+# 12b. npm-dir "." makes a malformed root manifest fatal: the root package is
+# the package being published, not unrelated tooling.
+new_case npm-dir-dot-malformed
+printf '{not json\n' > "$DIR/package.json"
+make_fake_gh "$DIR" "Apache-2.0"
+run_detect "$DIR" owner/repo "" "."
+if [[ $STATUS -ne 0 && ! -s "$OUT" ]] &&
+  grep -q "Could not parse package.json" "$DIR/stderr"; then
+  pass
+else
+  fail "malformed root manifest with npm-dir '.' must fail (status=$STATUS out=$(cat "$OUT") err=$(cat "$DIR/stderr"))"
+fi
+
 # 13. npm-dir with trailing slash
 new_case npm-dir-trailing-slash
 mkdir -p "$DIR/npm"

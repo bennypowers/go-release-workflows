@@ -93,9 +93,14 @@ if [[ -n "$(trim "$EXPLICIT_LICENSE")" ]]; then
 else
   PRIMARY_MANIFEST=""
   manifests=()
-  if [[ -n "$NPM_DIR" && "$NPM_DIR" != "." && "$NPM_DIR" != "./" ]]; then
-    PRIMARY_MANIFEST="${NPM_DIR%/}/package.json"
+  # "." and an empty value mean the repository root is the package directory.
+  # Treat that manifest as primary so a malformed one is fatal, and read it once.
+  NPM_DIR="${NPM_DIR%/}"
+  if [[ -n "$NPM_DIR" && "$NPM_DIR" != "." ]]; then
+    PRIMARY_MANIFEST="${NPM_DIR}/package.json"
     manifests+=("$PRIMARY_MANIFEST")
+  else
+    PRIMARY_MANIFEST="package.json"
   fi
   manifests+=("package.json")
 
@@ -107,7 +112,7 @@ else
       # A broken manifest in npm-dir is the package being published: fail
       # before any platform package ships with a fallback license. The root
       # package.json may be unrelated tooling, so only warn there.
-      if [[ -n "$PRIMARY_MANIFEST" && "$manifest" == "$PRIMARY_MANIFEST" ]]; then
+      if [[ "$manifest" == "$PRIMARY_MANIFEST" ]]; then
         fail "Could not parse $manifest as JSON; fix the manifest or pass the 'license' input"
       fi
       echo "::warning::Could not parse $manifest as JSON; skipping its license field" >&2

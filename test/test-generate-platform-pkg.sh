@@ -220,6 +220,17 @@ else
   fail "multiple license candidates must fail with an actionable error (status=$STATUS err=$(cat "$DIR/stderr"))"
 fi
 
+# 15b. platform package name follows the main npm package, not the binary name
+new_case npm-name-differs-from-binary
+printf 'MIT License\n' > "$DIR/LICENSE"
+run_pkg "$DIR" "" rhds-mcp linux-x64 "@rhds/mcp" linux x64
+if [[ $STATUS -eq 0 ]] &&
+  jq -e '.name == "@rhds/mcp-linux-x64"' "$PKG_DIR/package.json" >/dev/null; then
+  pass
+else
+  fail "platform package should be named after the main npm package (@rhds/mcp-linux-x64), got $(jq -r '.name' "$PKG_DIR/package.json" 2>/dev/null) (status=$STATUS)"
+fi
+
 # 16. explicit license-file disambiguates multiple candidates
 new_case multiple-license-explicit
 printf 'MIT License\n' > "$DIR/LICENSE-MIT"

@@ -29,11 +29,8 @@ runs:
         OUTPUT_FILE: ${{ inputs.output-file }}
         UPLOAD_TO_RELEASE: ${{ inputs.upload-to-release }}
       run: |
-        upload_args=()
-        if [[ -n "$UPLOAD_TO_RELEASE" ]]; then
-          upload_args=(--upload-to-release "$UPLOAD_TO_RELEASE")
-        fi
         "${{ github.action_path }}/generate-checksums.sh" \
           "$ARTIFACTS_DIR" \
           "$OUTPUT_FILE" \
-          "${upload_args[@]}"
+          --upload-to-release \
+          "$UPLOAD_TO_RELEASE"

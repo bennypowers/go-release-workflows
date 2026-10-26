@@ -8,22 +8,11 @@ SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.github/actions/generat
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-PASS=0
-FAIL=0
-
-fail() {
-  echo "FAIL: $1" >&2
-  FAIL=$((FAIL + 1))
-}
-
-pass() {
-  PASS=$((PASS + 1))
-}
+# shellcheck source=test/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 new_case() {
-  local name="$1"
-  DIR="$WORK/$name"
-  mkdir -p "$DIR"
+  init_case "$WORK" "$1"
 }
 
 # run_pkg <workdir> [license-file] [binary] [platform] [package-name] [os] [cpu]
@@ -81,6 +70,27 @@ if [[ $STATUS -eq 0 && -f "$PKG_DIR/LICENCE" ]]; then
   pass
 else
   fail "LICENCE spelling should be discovered (status=$STATUS)"
+fi
+
+# 4b. lowercase license filename is discovered
+new_case lowercase-license
+printf 'MIT License\n' > "$DIR/license"
+run_pkg "$DIR"
+if [[ $STATUS -eq 0 && -f "$PKG_DIR/license" ]]; then
+  pass
+else
+  fail "lowercase license filename should be discovered (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 4c. a lowercase non-license file with the same prefix is not treated as a license
+new_case lowercase-non-license
+printf 'console.log(1)\n' > "$DIR/license-check.js"
+run_pkg "$DIR"
+if [[ $STATUS -ne 0 && ! -f "$PKG_DIR/package.json" ]] &&
+  grep -q "No license file found" "$DIR/stderr"; then
+  pass
+else
+  fail "license-check.js must not be treated as the license (status=$STATUS err=$(cat "$DIR/stderr"))"
 fi
 
 # 5. explicit license-file path is honored

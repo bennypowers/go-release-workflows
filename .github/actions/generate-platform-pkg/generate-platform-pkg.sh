@@ -39,7 +39,9 @@ if [[ -n "$LICENSE_FILE" ]]; then
   fi
   LICENSE_SRC="$LICENSE_FILE"
 else
-  for candidate in LICENSE* LICENCE* COPYING*; do
+  # Lowercase forms are matched exactly or with an extension (license.md), not
+  # by prefix: a file like license-check.js is not a license.
+  for candidate in LICENSE* LICENCE* COPYING* license license.* licence licence.* copying copying.*; do
     if [[ -f "$candidate" && -s "$candidate" ]]; then
       LICENSE_SRC="$candidate"
       break

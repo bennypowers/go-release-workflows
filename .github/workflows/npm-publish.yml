@@ -75,7 +75,10 @@ jobs:
       license: ${{ steps.license.outputs.license }}
     steps:
       # detect-license reads package.json manifests, so the repo must be checked out.
+      # Check out the release tag so backfills read the manifest from that release.
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release-tag }}
 
       - uses: bennypowers/go-release-workflows/.github/actions/detect-license@main
         id: license
@@ -116,7 +119,10 @@ jobs:
             os: win32
             cpu: arm64
     steps:
+      # License copy and package manifests must match the release being published.
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release-tag }}
 
       - uses: bennypowers/go-release-workflows/.github/actions/setup-node@main
         with:
@@ -174,10 +180,19 @@ jobs:
             echo "::error::package.json not found in $DIR"
             exit 1
           fi
-          if [[ -z "$LICENSE_FILE" || ! -s "${DIR}/${LICENSE_FILE}" ]]; then
-            echo "::error::License file '${LICENSE_FILE}' not found or empty in $DIR; platform packages must include one"
-            echo "Directory contents:"
-            ls -la "$DIR"
+          if [[ -z "$LICENSE_FILE" ]]; then
+            echo "::error::generate-platform-pkg did not report a license file"
+            exit 1
+          fi
+          # Assert on the packed file list rather than the generator's output:
+          # npm's packlist decides what actually ships (it honors files,
+          # .npmignore, and the license auto-include rules).
+          PACK_JSON="$(cd "$DIR" && npm pack --dry-run --json --ignore-scripts)"
+          PACKED="$(jq -r '.[0].files[].path' <<<"$PACK_JSON")"
+          if ! grep -qxF -- "$LICENSE_FILE" <<<"$PACKED"; then
+            echo "::error::License file '${LICENSE_FILE}' is missing from the package tarball"
+            echo "Packed files:"
+            printf '%s\n' "$PACKED"
             exit 1
           fi
           echo "✓ Platform package verified: $(ls "$DIR")"
@@ -197,7 +212,10 @@ jobs:
       contents: read
       id-token: write
     steps:
+      # Package contents must match the release being published.
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release-tag }}
 
       - uses: bennypowers/go-release-workflows/.github/actions/setup-node@main
         with:
@@ -207,12 +225,17 @@ jobs:
       - uses: bennypowers/go-release-workflows/.github/actions/ensure-npm-oidc@main
         if: inputs.provenance
 
+      - uses: bennypowers/go-release-workflows/.github/actions/stage-license@main
+        with:
+          npm-dir: ${{ inputs.npm-dir }}
+          license-file: ${{ inputs.license-file }}
+
       - name: Run pre-publish script
         if: inputs.pre-main-publish-script != ''
         working-directory: ${{ inputs.npm-dir }}
         env:
           RELEASE_TAG: ${{ inputs.release-tag }}
-        run: ${{ inputs.pre-main-publish-script }}
+        run: ${{ inputs.pre-main-publish-script }} # action-safety: ignore -- caller script by design
 
       - name: Update version
         working-directory: ${{ inputs.npm-dir }}

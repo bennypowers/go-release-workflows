@@ -8,17 +8,8 @@ SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.github/actions/detect-
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-PASS=0
-FAIL=0
-
-fail() {
-  echo "FAIL: $1" >&2
-  FAIL=$((FAIL + 1))
-}
-
-pass() {
-  PASS=$((PASS + 1))
-}
+# shellcheck source=test/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # run_detect <workdir> <repository> [explicit] [npm-dir]
 # Sets OUT, STATUS.
@@ -47,9 +38,7 @@ EOF
 }
 
 new_case() {
-  local name="$1"
-  DIR="$WORK/$name"
-  mkdir -p "$DIR"
+  init_case "$WORK" "$1"
   make_fake_gh "$DIR"
 }
 
@@ -278,6 +267,40 @@ if [[ $STATUS -ne 0 && ! -s "$OUT" ]] &&
   pass
 else
   fail "API failure should include the captured error and GH_TOKEN/rate-limit hint (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 22. SEE LICENSE IN with a path is accepted (npm file-reference syntax)
+new_case explicit-see-license-path
+run_detect "$DIR" owner/repo "SEE LICENSE IN ../LICENSE"
+if [[ $STATUS -eq 0 && "$(cat "$OUT")" == "license=SEE LICENSE IN ../LICENSE" ]]; then
+  pass
+else
+  fail "SEE LICENSE IN with a path should be accepted (status=$STATUS out=$(cat "$OUT") err=$(cat "$DIR/stderr"))"
+fi
+
+# 23. non-string license object values are ignored, not coerced
+new_case license-object-nonstring
+mkdir -p "$DIR/npm"
+echo '{"license":{"type":false}}' > "$DIR/npm/package.json"
+echo '{"license":"MIT"}' > "$DIR/package.json"
+run_detect "$DIR" owner/repo "" "npm"
+if [[ $STATUS -eq 0 && "$(cat "$OUT")" == "license=MIT" ]]; then
+  pass
+else
+  fail "non-string license type should fall through to the next tier (status=$STATUS out=$(cat "$OUT"))"
+fi
+
+# 24. a legacy licenses array of strings is skipped without a bogus parse warning
+new_case licenses-array-nonobject
+mkdir -p "$DIR/npm"
+echo '{"licenses":["MIT"]}' > "$DIR/npm/package.json"
+echo '{"license":"MPL-2.0"}' > "$DIR/package.json"
+run_detect "$DIR" owner/repo "" "npm"
+if [[ $STATUS -eq 0 && "$(cat "$OUT")" == "license=MPL-2.0" ]] &&
+  ! grep -q "Could not parse" "$DIR/stderr"; then
+  pass
+else
+  fail "licenses array of strings should fall through without a parse warning (status=$STATUS out=$(cat "$OUT") err=$(cat "$DIR/stderr"))"
 fi
 
 echo "detect-license: $PASS passed, $FAIL failed"

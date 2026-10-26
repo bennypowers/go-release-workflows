@@ -62,7 +62,10 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Build ${{ matrix.platform }}
-        run: make ${{ matrix.platform }}
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          make "$PLATFORM"
 
       - uses: bennypowers/go-release-workflows/.github/actions/validate-output@main
         with:
@@ -73,9 +76,12 @@ jobs:
         if: inputs.release-tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+          BINARY_NAME: ${{ inputs.binary-name }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
-          gh release upload '${{ inputs.release-tag }}' \
-            'dist/bin/${{ inputs.binary-name }}-${{ matrix.platform }}' \
+          gh release upload "$RELEASE_TAG" \
+            "dist/bin/${BINARY_NAME}-${PLATFORM}" \
             --clobber
 
       - uses: actions/upload-artifact@v7
@@ -106,7 +112,10 @@ jobs:
           cache: true
 
       - name: Build ${{ matrix.platform }}
-        run: make ${{ matrix.platform }}
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          make "$PLATFORM"
 
       - uses: bennypowers/go-release-workflows/.github/actions/validate-output@main
         with:
@@ -117,9 +126,12 @@ jobs:
         if: inputs.release-tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+          BINARY_NAME: ${{ inputs.binary-name }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
-          gh release upload '${{ inputs.release-tag }}' \
-            'dist/bin/${{ inputs.binary-name }}-${{ matrix.platform }}' \
+          gh release upload "$RELEASE_TAG" \
+            "dist/bin/${BINARY_NAME}-${PLATFORM}" \
             --clobber
 
       - uses: actions/upload-artifact@v7
@@ -156,9 +168,11 @@ jobs:
           go-version: ${{ steps.setup-go.outputs.go-version }}
 
       - name: Build ${{ matrix.platform }}
-        run: make ${{ matrix.platform }}
         env:
+          PLATFORM: ${{ matrix.platform }}
           WINDOWS_IMAGE: ${{ steps.windows-setup.outputs.image }}
+        run: |
+          make "$PLATFORM"
 
       - uses: bennypowers/go-release-workflows/.github/actions/validate-output@main
         with:
@@ -170,9 +184,12 @@ jobs:
         if: inputs.release-tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+          BINARY_NAME: ${{ inputs.binary-name }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
-          gh release upload '${{ inputs.release-tag }}' \
-            'dist/bin/${{ inputs.binary-name }}-${{ matrix.platform }}.exe' \
+          gh release upload "$RELEASE_TAG" \
+            "dist/bin/${BINARY_NAME}-${PLATFORM}.exe" \
             --clobber
 
       - uses: actions/upload-artifact@v7

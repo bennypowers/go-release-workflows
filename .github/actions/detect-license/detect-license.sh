@@ -49,9 +49,15 @@ normalize_license() {
 validate_license() {
   local value="$1" source="$2" display
   local pattern='^[A-Za-z0-9.+() -]+$'
+  # npm also allows the file-reference form "SEE LICENSE IN <filename>", whose
+  # filename may contain path separators, underscores, and similar characters.
+  local file_ref='^SEE LICENSE IN [A-Za-z0-9._+()/ -]+$'
   if [[ "$value" =~ [[:cntrl:]] ]]; then
     printf -v display '%q' "$value"
     fail "License $display from $source contains control characters; pass a valid SPDX expression (e.g. MIT, GPL-3.0-or-later)"
+  fi
+  if [[ "$value" =~ $file_ref ]]; then
+    return 0
   fi
   if [[ ! "$value" =~ $pattern ]]; then
     fail "License '$value' from $source is not a valid SPDX expression; allowed characters are letters, digits, '.', '+', '(', ')', ' ', and '-' (e.g. MIT, GPL-3.0-or-later, (MIT OR Apache-2.0), SEE LICENSE IN LICENSE)"
@@ -65,9 +71,10 @@ read_manifest_license() {
   [[ -f "$manifest" ]] || return 0
   local output status=0
   output=$(jq -r '
-    if (.license | type) == "object" then .license.type
+    if (.license | type) == "object" then (.license.type | select(type == "string"))
     elif (.license | type) == "string" then .license
-    elif (.licenses | type) == "array" then (.licenses[0].type // empty)
+    elif (.licenses | type) == "array" then
+      (.licenses[0] | if type == "object" then (.type | select(type == "string")) else empty end)
     else empty
     end
   ' "$manifest" 2>/dev/null) || status=$?

@@ -21,9 +21,5 @@ runs:
         PLATFORM: ${{ inputs.platform }}
         WINDOWS: ${{ inputs.windows }}
       run: |
-        if [[ "$WINDOWS" == 'true' ]]; then
-          "${{ github.action_path }}/validate-output.sh" "$BINARY_NAME" "$PLATFORM" --windows
-        else
-          "${{ github.action_path }}/validate-output.sh" "$BINARY_NAME" "$PLATFORM"
-        fi
+        "${{ github.action_path }}/validate-output.sh" "$BINARY_NAME" "$PLATFORM" "$WINDOWS"
       shell: bash

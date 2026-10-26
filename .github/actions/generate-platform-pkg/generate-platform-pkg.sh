@@ -25,43 +25,11 @@ VERSION="${RELEASE_TAG#v}"
 PLATFORM_DIR="platforms/${BINARY_NAME}-${PLATFORM}"
 mkdir -p "$PLATFORM_DIR"
 
-# Locate the license file: explicit path wins, otherwise use conventional names.
-# Empty files are rejected: a zero-byte license is not a license.
-LICENSE_SRC=""
-if [[ -n "$LICENSE_FILE" ]]; then
-  if [[ ! -f "$LICENSE_FILE" ]]; then
-    echo "::error::License file not found: $LICENSE_FILE" >&2
-    exit 1
-  fi
-  if [[ ! -s "$LICENSE_FILE" ]]; then
-    echo "::error::License file is empty: $LICENSE_FILE" >&2
-    exit 1
-  fi
-  LICENSE_SRC="$LICENSE_FILE"
-else
-  # Lowercase forms are matched exactly or with an extension (license.md), not
-  # by prefix: a file like license-check.js is not a license.
-  for candidate in LICENSE* LICENCE* COPYING* license license.* licence licence.* copying copying.*; do
-    if [[ -f "$candidate" && -s "$candidate" ]]; then
-      LICENSE_SRC="$candidate"
-      break
-    fi
-  done
-fi
-
-if [[ -z "$LICENSE_SRC" ]]; then
-  echo "::error::No license file found in $(pwd); platform packages must include one (set the license-file input or add LICENSE to the repository)" >&2
-  exit 1
-fi
-
-LICENSE_NAME=$(basename "$LICENSE_SRC")
-
-# The basename is written to $GITHUB_OUTPUT as a key=value line, so control
-# characters (notably newlines) would corrupt the output file.
-if [[ "$LICENSE_NAME" =~ [[:cntrl:]] ]]; then
-  printf '::error::License filename contains control characters: %q\n' "$LICENSE_NAME" >&2
-  exit 1
-fi
+# Locate the license file: explicit path wins, otherwise exactly one
+# conventional name must exist. Ambiguous candidates are an error.
+# shellcheck source=.github/actions/lib/license.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../lib/license.sh"
+discover_license_file "$LICENSE_FILE" "platform packages"
 
 # Real copy, not a symlink: the tarball must remain self-contained.
 cp "$LICENSE_SRC" "$PLATFORM_DIR/$LICENSE_NAME"

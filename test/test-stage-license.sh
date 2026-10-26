@@ -104,5 +104,28 @@ else
   fail "missing npm-dir must fail (status=$STATUS)"
 fi
 
+# 8. multiple license candidates require an explicit choice
+new_case multiple-license-candidates
+printf 'MIT License\n' > "$DIR/LICENSE-MIT"
+printf 'Apache License\n' > "$DIR/LICENSE-APACHE"
+run_stage "$DIR"
+if [[ $STATUS -ne 0 ]] && grep -q "Multiple license files" "$DIR/stderr"; then
+  pass
+else
+  fail "multiple license candidates must fail with an actionable error (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 9. explicit license-file disambiguates multiple candidates
+new_case multiple-license-explicit
+printf 'MIT License\n' > "$DIR/LICENSE-MIT"
+printf 'Apache License\n' > "$DIR/LICENSE-APACHE"
+run_stage "$DIR" npm LICENSE-APACHE
+if [[ $STATUS -eq 0 && -f "$DIR/npm/LICENSE-APACHE" ]] &&
+  cmp -s "$DIR/LICENSE-APACHE" "$DIR/npm/LICENSE-APACHE"; then
+  pass
+else
+  fail "explicit license-file should choose one candidate (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
 echo "stage-license: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]

@@ -237,17 +237,31 @@ else
   fail "control characters in a license must be rejected (status=$STATUS out=$(cat "$OUT") err=$(cat "$DIR/stderr"))"
 fi
 
-# 20. malformed manifest warns and falls through to the next tier
-new_case malformed-manifest
+# 20. malformed npm-dir manifest is fatal before any package is published
+new_case malformed-npm-manifest
 mkdir -p "$DIR/npm"
 printf '{not json\n' > "$DIR/npm/package.json"
 echo '{"license":"MPL-2.0"}' > "$DIR/package.json"
 run_detect "$DIR" owner/repo "" "npm"
-if [[ $STATUS -eq 0 && "$(cat "$OUT")" == "license=MPL-2.0" ]] &&
-  grep -q "::warning::Could not parse npm/package.json" "$DIR/stderr"; then
+if [[ $STATUS -ne 0 && ! -s "$OUT" ]] &&
+  grep -q "Could not parse npm/package.json" "$DIR/stderr"; then
   pass
 else
-  fail "malformed manifest should warn and fall through (status=$STATUS out=$(cat "$OUT") err=$(cat "$DIR/stderr"))"
+  fail "malformed npm-dir manifest must fail (status=$STATUS out=$(cat "$OUT") err=$(cat "$DIR/stderr"))"
+fi
+
+# 21. malformed root manifest warns and falls through (root may be unrelated tooling)
+new_case malformed-root-manifest
+mkdir -p "$DIR/npm"
+echo '{"name":"x"}' > "$DIR/npm/package.json"
+printf '{not json\n' > "$DIR/package.json"
+make_fake_gh "$DIR" "Apache-2.0"
+run_detect "$DIR" owner/repo "" "npm"
+if [[ $STATUS -eq 0 && "$(cat "$OUT")" == "license=Apache-2.0" ]] &&
+  grep -q "::warning::Could not parse package.json" "$DIR/stderr"; then
+  pass
+else
+  fail "malformed root manifest should warn and fall through (status=$STATUS out=$(cat "$OUT") err=$(cat "$DIR/stderr"))"
 fi
 
 # 21. API failure surfaces the captured error and an actionable hint

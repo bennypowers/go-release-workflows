@@ -209,5 +209,28 @@ else
   fail "package.json should stay valid when values need JSON escaping (status=$STATUS err=$(cat "$DIR/stderr"))"
 fi
 
+# 15. multiple license candidates require an explicit choice
+new_case multiple-license-candidates
+printf 'MIT License\n' > "$DIR/LICENSE-MIT"
+printf 'Apache License\n' > "$DIR/LICENSE-APACHE"
+run_pkg "$DIR"
+if [[ $STATUS -ne 0 ]] && grep -q "Multiple license files" "$DIR/stderr"; then
+  pass
+else
+  fail "multiple license candidates must fail with an actionable error (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 16. explicit license-file disambiguates multiple candidates
+new_case multiple-license-explicit
+printf 'MIT License\n' > "$DIR/LICENSE-MIT"
+printf 'Apache License\n' > "$DIR/LICENSE-APACHE"
+run_pkg "$DIR" LICENSE-MIT
+if [[ $STATUS -eq 0 && -f "$PKG_DIR/LICENSE-MIT" ]] &&
+  cmp -s "$DIR/LICENSE-MIT" "$PKG_DIR/LICENSE-MIT"; then
+  pass
+else
+  fail "explicit license-file should choose one candidate (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
 echo "generate-platform-pkg: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]

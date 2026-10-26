@@ -69,7 +69,9 @@ validate_license() {
 read_manifest_license() {
   local manifest="$1"
   [[ -f "$manifest" ]] || return 0
-  local output status=0
+  local output
+  # Exit status 2 means the file exists but is not valid JSON, which the caller
+  # treats differently from a manifest with no license field.
   output=$(jq -r '
     if (.license | type) == "object" then (.license.type | select(type == "string"))
     elif (.license | type) == "string" then .license
@@ -77,11 +79,7 @@ read_manifest_license() {
       (.licenses[0] | if type == "object" then (.type | select(type == "string")) else empty end)
     else empty
     end
-  ' "$manifest" 2>/dev/null) || status=$?
-  if [[ $status -ne 0 ]]; then
-    echo "::warning::Could not parse $manifest as JSON; skipping its license field" >&2
-    return 0
-  fi
+  ' "$manifest" 2>/dev/null) || return 2
   printf '%s' "$output"
 }
 
@@ -93,15 +91,29 @@ if [[ -n "$(trim "$EXPLICIT_LICENSE")" ]]; then
   [[ -n "$LICENSE" ]] || fail "Explicit license '$EXPLICIT_LICENSE' is not a usable SPDX identifier"
   SOURCE="explicit license input"
 else
+  PRIMARY_MANIFEST=""
   manifests=()
   if [[ -n "$NPM_DIR" && "$NPM_DIR" != "." && "$NPM_DIR" != "./" ]]; then
-    manifests+=("${NPM_DIR%/}/package.json")
+    PRIMARY_MANIFEST="${NPM_DIR%/}/package.json"
+    manifests+=("$PRIMARY_MANIFEST")
   fi
   manifests+=("package.json")
 
   for manifest in "${manifests[@]}"; do
     [[ -f "$manifest" ]] || continue
-    LICENSE=$(normalize_license "$(read_manifest_license "$manifest")")
+    manifest_status=0
+    manifest_license=$(read_manifest_license "$manifest") || manifest_status=$?
+    if [[ $manifest_status -eq 2 ]]; then
+      # A broken manifest in npm-dir is the package being published: fail
+      # before any platform package ships with a fallback license. The root
+      # package.json may be unrelated tooling, so only warn there.
+      if [[ -n "$PRIMARY_MANIFEST" && "$manifest" == "$PRIMARY_MANIFEST" ]]; then
+        fail "Could not parse $manifest as JSON; fix the manifest or pass the 'license' input"
+      fi
+      echo "::warning::Could not parse $manifest as JSON; skipping its license field" >&2
+      continue
+    fi
+    LICENSE=$(normalize_license "$manifest_license")
     if [[ -n "$LICENSE" ]]; then
       SOURCE="$manifest"
       break

@@ -26,16 +26,21 @@ PLATFORM_DIR="platforms/${BINARY_NAME}-${PLATFORM}"
 mkdir -p "$PLATFORM_DIR"
 
 # Locate the license file: explicit path wins, otherwise use conventional names.
+# Empty files are rejected: a zero-byte license is not a license.
 LICENSE_SRC=""
 if [[ -n "$LICENSE_FILE" ]]; then
   if [[ ! -f "$LICENSE_FILE" ]]; then
     echo "::error::License file not found: $LICENSE_FILE" >&2
     exit 1
   fi
+  if [[ ! -s "$LICENSE_FILE" ]]; then
+    echo "::error::License file is empty: $LICENSE_FILE" >&2
+    exit 1
+  fi
   LICENSE_SRC="$LICENSE_FILE"
 else
   for candidate in LICENSE* LICENCE* COPYING*; do
-    if [[ -f "$candidate" ]]; then
+    if [[ -f "$candidate" && -s "$candidate" ]]; then
       LICENSE_SRC="$candidate"
       break
     fi
@@ -49,8 +54,19 @@ fi
 
 LICENSE_NAME=$(basename "$LICENSE_SRC")
 
+# The basename is written to $GITHUB_OUTPUT as a key=value line, so control
+# characters (notably newlines) would corrupt the output file.
+if [[ "$LICENSE_NAME" =~ [[:cntrl:]] ]]; then
+  printf '::error::License filename contains control characters: %q\n' "$LICENSE_NAME" >&2
+  exit 1
+fi
+
 # Real copy, not a symlink: the tarball must remain self-contained.
 cp "$LICENSE_SRC" "$PLATFORM_DIR/$LICENSE_NAME"
+
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  echo "license-file=$LICENSE_NAME" >> "$GITHUB_OUTPUT"
+fi
 
 # Build package name: scoped (@scope/binary-platform) or unscoped (binary-platform)
 if [[ -n "$SCOPE" ]]; then
@@ -59,20 +75,28 @@ else
   PKG_NAME="${BINARY_NAME}-${PLATFORM}"
 fi
 
-cat > "$PLATFORM_DIR/package.json" << EOF
-{
-  "name": "${PKG_NAME}",
-  "version": "$VERSION",
-  "os": ["$PLATFORM_OS"],
-  "cpu": ["$PLATFORM_CPU"],
-  "type": "module",
-  "files": ["${BINARY_NAME}*", "${LICENSE_NAME}"],
-  "license": "$LICENSE",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/${REPOSITORY}"
-  }
-}
-EOF
+# jq escapes all values so package.json stays valid for any input.
+jq -n \
+  --arg name "$PKG_NAME" \
+  --arg version "$VERSION" \
+  --arg os "$PLATFORM_OS" \
+  --arg cpu "$PLATFORM_CPU" \
+  --arg binary_glob "${BINARY_NAME}*" \
+  --arg license_file "$LICENSE_NAME" \
+  --arg license "$LICENSE" \
+  --arg repository_url "https://github.com/${REPOSITORY}" \
+  '{
+    name: $name,
+    version: $version,
+    os: [$os],
+    cpu: [$cpu],
+    type: "module",
+    files: [$binary_glob, $license_file],
+    license: $license,
+    repository: {
+      type: "git",
+      url: $repository_url
+    }
+  }' > "$PLATFORM_DIR/package.json"
 
 echo "✓ Generated package.json and copied ${LICENSE_NAME} for ${BINARY_NAME}-${PLATFORM}"

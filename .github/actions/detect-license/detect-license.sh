@@ -44,18 +44,38 @@ normalize_license() {
   printf '%s' "$value"
 }
 
+# Defense in depth: license values flow into generated package.json files and
+# npm metadata, so only accept characters used by SPDX expressions.
+validate_license() {
+  local value="$1" source="$2" display
+  local pattern='^[A-Za-z0-9.+() -]+$'
+  if [[ "$value" =~ [[:cntrl:]] ]]; then
+    printf -v display '%q' "$value"
+    fail "License $display from $source contains control characters; pass a valid SPDX expression (e.g. MIT, GPL-3.0-or-later)"
+  fi
+  if [[ ! "$value" =~ $pattern ]]; then
+    fail "License '$value' from $source is not a valid SPDX expression; allowed characters are letters, digits, '.', '+', '(', ')', ' ', and '-' (e.g. MIT, GPL-3.0-or-later, (MIT OR Apache-2.0), SEE LICENSE IN LICENSE)"
+  fi
+}
+
 # Read the license field from a package.json, supporting both the modern
 # string form and the legacy object/array forms.
 read_manifest_license() {
   local manifest="$1"
   [[ -f "$manifest" ]] || return 0
-  jq -r '
+  local output status=0
+  output=$(jq -r '
     if (.license | type) == "object" then .license.type
     elif (.license | type) == "string" then .license
     elif (.licenses | type) == "array" then (.licenses[0].type // empty)
     else empty
     end
-  ' "$manifest" 2>/dev/null || true
+  ' "$manifest" 2>/dev/null) || status=$?
+  if [[ $status -ne 0 ]]; then
+    echo "::warning::Could not parse $manifest as JSON; skipping its license field" >&2
+    return 0
+  fi
+  printf '%s' "$output"
 }
 
 LICENSE=""
@@ -82,15 +102,26 @@ else
   done
 
   if [[ -z "$LICENSE" ]]; then
-    LICENSE=$(normalize_license "$(gh api "repos/$REPOSITORY" --jq '.license.spdx_id // empty' 2>/dev/null || true)")
-    if [[ -n "$LICENSE" ]]; then
-      SOURCE="GitHub API"
+    API_ERR=$(mktemp "${TMPDIR:-/tmp}/detect-license.XXXXXX")
+    if API_OUT=$(gh api "repos/$REPOSITORY" --jq '.license.spdx_id // empty' 2>"$API_ERR"); then
+      rm -f "$API_ERR"
+      LICENSE=$(normalize_license "$API_OUT")
+      if [[ -n "$LICENSE" ]]; then
+        SOURCE="GitHub API"
+      fi
+    else
+      API_STATUS=$?
+      API_MESSAGE=$(cat "$API_ERR")
+      rm -f "$API_ERR"
+      fail "GitHub API request for $REPOSITORY failed (exit $API_STATUS): ${API_MESSAGE:-no error output}. Check that GH_TOKEN is set with repository read access and that the API rate limit has not been exceeded, or pass the 'license' input / set \"license\" in package.json."
     fi
   fi
 fi
 
 [[ -n "$LICENSE" ]] || fail \
   "Could not determine license for $REPOSITORY: pass the 'license' input, set \"license\" in $NPM_DIR/package.json or package.json, or use a license GitHub recognizes"
+
+validate_license "$LICENSE" "$SOURCE"
 
 echo "Detected license '$LICENSE' from $SOURCE" >&2
 echo "license=$LICENSE" >> "$GITHUB_OUTPUT"

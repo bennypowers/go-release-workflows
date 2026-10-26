@@ -135,6 +135,7 @@ jobs:
           release-tag: ${{ inputs.release-tag }}
 
       - uses: bennypowers/go-release-workflows/.github/actions/generate-platform-pkg@main
+        id: generate
         with:
           binary-name: ${{ inputs.binary-name }}
           platform: ${{ matrix.platform }}
@@ -152,14 +153,17 @@ jobs:
       # ensure-npm-oidc installs an 11.x npm only when the bundled one is too old.
 
       - name: Verify platform package contents
+        env:
+          BINARY_NAME: ${{ inputs.binary-name }}
+          PLATFORM: ${{ matrix.platform }}
+          LICENSE_FILE: ${{ steps.generate.outputs.license-file }}
         run: |
-          DIR="platforms/${{ inputs.binary-name }}-${{ matrix.platform }}"
-          PLATFORM="${{ matrix.platform }}"
+          DIR="platforms/${BINARY_NAME}-${PLATFORM}"
           EXT=""
           if [[ "$PLATFORM" == win32-* ]]; then
             EXT=".exe"
           fi
-          EXPECTED="${DIR}/${{ inputs.binary-name }}${EXT}"
+          EXPECTED="${DIR}/${BINARY_NAME}${EXT}"
           if [[ ! -f "$EXPECTED" ]]; then
             echo "::error::Expected binary not found: $EXPECTED"
             echo "Directory contents:"
@@ -170,8 +174,10 @@ jobs:
             echo "::error::package.json not found in $DIR"
             exit 1
           fi
-          if ! compgen -G "${DIR}/LICENSE*" >/dev/null && ! compgen -G "${DIR}/LICENCE*" >/dev/null && ! compgen -G "${DIR}/COPYING*" >/dev/null; then
-            echo "::error::License file not found in $DIR; platform packages must include one"
+          if [[ -z "$LICENSE_FILE" || ! -s "${DIR}/${LICENSE_FILE}" ]]; then
+            echo "::error::License file '${LICENSE_FILE}' not found or empty in $DIR; platform packages must include one"
+            echo "Directory contents:"
+            ls -la "$DIR"
             exit 1
           fi
           echo "✓ Platform package verified: $(ls "$DIR")"

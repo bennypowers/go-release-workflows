@@ -158,5 +158,127 @@ else
   fail "API failure without manifests must fail (status=$STATUS out=$(cat "$OUT"))"
 fi
 
+# 11. legacy licenses array form
+new_case licenses-array
+mkdir -p "$DIR/npm"
+echo '{"licenses":[{"type":"ISC"}]}' > "$DIR/npm/package.json"
+run_detect "$DIR" owner/repo "" "npm"
+if [[ $STATUS -eq 0 && "$(cat "$OUT")" == "license=ISC" ]]; then
+  pass
+else
+  fail "licenses array type should be read (status=$STATUS out=$(cat "$OUT"))"
+fi
+
+# 12. npm-dir "." reads the root manifest once, correctly
+new_case npm-dir-dot
+echo '{"license":"Apache-2.0"}' > "$DIR/package.json"
+run_detect "$DIR" owner/repo "" "."
+if [[ $STATUS -eq 0 && "$(cat "$OUT")" == "license=Apache-2.0" ]]; then
+  pass
+else
+  fail "npm-dir '.' should read the root package.json license (status=$STATUS out=$(cat "$OUT"))"
+fi
+
+# 13. npm-dir with trailing slash
+new_case npm-dir-trailing-slash
+mkdir -p "$DIR/npm"
+echo '{"license":"Apache-2.0"}' > "$DIR/npm/package.json"
+run_detect "$DIR" owner/repo "" "npm/"
+if [[ $STATUS -eq 0 && "$(cat "$OUT")" == "license=Apache-2.0" ]]; then
+  pass
+else
+  fail "npm-dir 'npm/' (trailing slash) should read npm/package.json license (status=$STATUS out=$(cat "$OUT"))"
+fi
+
+# 14. npm-dir manifest without license falls through to root manifest
+new_case manifest-fallthrough
+mkdir -p "$DIR/npm"
+echo '{"name":"x"}' > "$DIR/npm/package.json"
+echo '{"license":"MPL-2.0"}' > "$DIR/package.json"
+run_detect "$DIR" owner/repo "" "npm"
+if [[ $STATUS -eq 0 && "$(cat "$OUT")" == "license=MPL-2.0" ]]; then
+  pass
+else
+  fail "licenseless npm-dir manifest should fall through to root package.json (status=$STATUS out=$(cat "$OUT"))"
+fi
+
+# 15. literal null from the GitHub API is rejected, never emitted
+new_case api-null
+make_fake_gh "$DIR" "null"
+run_detect "$DIR" owner/repo "" "npm"
+if [[ $STATUS -ne 0 && ! -s "$OUT" ]]; then
+  pass
+else
+  fail "literal null license from API must be rejected (status=$STATUS out=$(cat "$OUT"))"
+fi
+
+# 16. compound and file-reference SPDX expressions are accepted
+new_case explicit-spdx-expression
+run_detect "$DIR" owner/repo "(MIT OR Apache-2.0)"
+if [[ $STATUS -eq 0 && "$(cat "$OUT")" == "license=(MIT OR Apache-2.0)" ]]; then
+  pass
+else
+  fail "compound SPDX expression should be accepted (status=$STATUS out=$(cat "$OUT") err=$(cat "$DIR/stderr"))"
+fi
+
+# 17. SEE LICENSE IN file reference is accepted
+new_case explicit-see-license
+run_detect "$DIR" owner/repo "SEE LICENSE IN LICENSE"
+if [[ $STATUS -eq 0 && "$(cat "$OUT")" == "license=SEE LICENSE IN LICENSE" ]]; then
+  pass
+else
+  fail "SEE LICENSE IN expression should be accepted (status=$STATUS out=$(cat "$OUT") err=$(cat "$DIR/stderr"))"
+fi
+
+# 18. shell metacharacters in an explicit license are rejected
+new_case explicit-shell-metacharacters
+run_detect "$DIR" owner/repo 'MIT; echo pwned'
+if [[ $STATUS -ne 0 && ! -s "$OUT" ]] && grep -q "not a valid SPDX expression" "$DIR/stderr"; then
+  pass
+else
+  fail "shell metacharacters in a license must be rejected (status=$STATUS out=$(cat "$OUT") err=$(cat "$DIR/stderr"))"
+fi
+
+# 19. control characters in an explicit license are rejected
+new_case explicit-control-character
+run_detect "$DIR" owner/repo $'MIT\nApache-2.0'
+if [[ $STATUS -ne 0 && ! -s "$OUT" ]] && grep -q "control characters" "$DIR/stderr"; then
+  pass
+else
+  fail "control characters in a license must be rejected (status=$STATUS out=$(cat "$OUT") err=$(cat "$DIR/stderr"))"
+fi
+
+# 20. malformed manifest warns and falls through to the next tier
+new_case malformed-manifest
+mkdir -p "$DIR/npm"
+printf '{not json\n' > "$DIR/npm/package.json"
+echo '{"license":"MPL-2.0"}' > "$DIR/package.json"
+run_detect "$DIR" owner/repo "" "npm"
+if [[ $STATUS -eq 0 && "$(cat "$OUT")" == "license=MPL-2.0" ]] &&
+  grep -q "::warning::Could not parse npm/package.json" "$DIR/stderr"; then
+  pass
+else
+  fail "malformed manifest should warn and fall through (status=$STATUS out=$(cat "$OUT") err=$(cat "$DIR/stderr"))"
+fi
+
+# 21. API failure surfaces the captured error and an actionable hint
+new_case api-error-message
+mkdir -p "$DIR/bin"
+cat > "$DIR/bin/gh" << 'EOF'
+#!/usr/bin/env bash
+echo "HTTP 403: API rate limit exceeded" >&2
+exit 1
+EOF
+chmod +x "$DIR/bin/gh"
+run_detect "$DIR" owner/repo "" "npm"
+if [[ $STATUS -ne 0 && ! -s "$OUT" ]] &&
+  grep -q "HTTP 403: API rate limit exceeded" "$DIR/stderr" &&
+  grep -q "GH_TOKEN" "$DIR/stderr" &&
+  grep -q "rate limit" "$DIR/stderr"; then
+  pass
+else
+  fail "API failure should include the captured error and GH_TOKEN/rate-limit hint (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
 echo "detect-license: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]

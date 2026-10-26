@@ -26,16 +26,19 @@ new_case() {
   mkdir -p "$DIR"
 }
 
-# run_pkg <workdir> [license-file]
+# run_pkg <workdir> [license-file] [binary] [platform] [package-name] [os] [cpu]
 run_pkg() {
   local dir="$1" license_file="${2:-}"
+  local binary="${3:-myapp}" platform="${4:-linux-x64}" package_name="${5:-@scope/myapp}"
+  local os="${6:-linux}" cpu="${7:-x64}"
   mkdir -p "$dir/platforms"
+  : > "$dir/github_output"
   (
     cd "$dir" || exit 1
-    bash "$SCRIPT" myapp linux-x64 "@scope/myapp" v1.2.3 MIT linux x64 owner/repo "$license_file"
+    GITHUB_OUTPUT="$dir/github_output" bash "$SCRIPT" "$binary" "$platform" "$package_name" v1.2.3 MIT "$os" "$cpu" owner/repo "$license_file"
   ) > "$dir/stdout" 2> "$dir/stderr"
   STATUS=$?
-  PKG_DIR="$dir/platforms/myapp-linux-x64"
+  PKG_DIR="$dir/platforms/${binary}-${platform}"
 }
 
 # 1. LICENSE is copied as a real file, not a symlink
@@ -95,10 +98,11 @@ fi
 # 6. missing license fails instead of publishing non-compliant package
 new_case missing-license
 run_pkg "$DIR"
-if [[ $STATUS -ne 0 ]]; then
+if [[ $STATUS -ne 0 && ! -f "$PKG_DIR/package.json" ]] &&
+  grep -q "No license file found" "$DIR/stderr"; then
   pass
 else
-  fail "missing license file must fail the build"
+  fail "missing license file must fail without writing package.json and print an actionable error (status=$STATUS pkgjson=$(ls "$PKG_DIR" 2>&1))"
 fi
 
 # 7. package metadata still correct
@@ -110,6 +114,89 @@ if [[ $STATUS -eq 0 ]] &&
   pass
 else
   fail "package.json metadata should be preserved (status=$STATUS)"
+fi
+
+# 8. unscoped package on win32-x64
+new_case unscoped-win32
+printf 'MIT License\n' > "$DIR/LICENSE"
+run_pkg "$DIR" "" myapp win32-x64 myapp win32 x64
+if [[ $STATUS -eq 0 ]] &&
+  jq -e '.name == "myapp-win32-x64" and .os == ["win32"] and .cpu == ["x64"]' "$PKG_DIR/package.json" >/dev/null; then
+  pass
+else
+  fail "unscoped win32-x64 package should be named myapp-win32-x64 with os/cpu set (status=$STATUS)"
+fi
+
+# 9. license-file output is written for the workflow verifier
+new_case license-file-output
+printf 'MIT License\n' > "$DIR/LICENSE.md"
+run_pkg "$DIR"
+if [[ $STATUS -eq 0 && "$(cat "$DIR/github_output")" == "license-file=LICENSE.md" ]]; then
+  pass
+else
+  fail "license-file output should name the copied license (status=$STATUS output=$(cat "$DIR/github_output" 2>&1))"
+fi
+
+# 10. empty explicit license file fails
+new_case empty-explicit-license
+mkdir -p "$DIR/legal"
+: > "$DIR/legal/COPYING"
+run_pkg "$DIR" "legal/COPYING"
+if [[ $STATUS -ne 0 && ! -f "$PKG_DIR/package.json" ]] &&
+  grep -q "License file is empty" "$DIR/stderr"; then
+  pass
+else
+  fail "empty explicit license file must fail (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 11. empty auto-discovered license is skipped in favor of a non-empty one
+new_case empty-auto-license-skipped
+: > "$DIR/LICENSE"
+printf 'MIT License\n' > "$DIR/LICENSE.md"
+run_pkg "$DIR"
+if [[ $STATUS -eq 0 && -s "$PKG_DIR/LICENSE.md" ]] &&
+  jq -e '.files | index("LICENSE.md")' "$PKG_DIR/package.json" >/dev/null; then
+  pass
+else
+  fail "empty LICENSE should be skipped in favor of LICENSE.md (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 12. an empty auto-discovered license alone still fails
+new_case empty-auto-license-only
+: > "$DIR/LICENSE"
+run_pkg "$DIR"
+if [[ $STATUS -ne 0 && ! -f "$PKG_DIR/package.json" ]] &&
+  grep -q "No license file found" "$DIR/stderr"; then
+  pass
+else
+  fail "an empty license must not satisfy the license requirement (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 13. license filenames with control characters are rejected
+new_case control-character-license-name
+printf 'MIT License\n' > "$DIR/"$'LIC\nENSE'
+run_pkg "$DIR" $'LIC\nENSE'
+if [[ $STATUS -ne 0 && ! -f "$PKG_DIR/package.json" ]] &&
+  grep -q "control characters" "$DIR/stderr"; then
+  pass
+else
+  fail "control characters in the license filename must be rejected (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 14. package.json values are JSON-escaped
+new_case json-escaping
+printf 'MIT License\n' > "$DIR/LICENSE"
+(
+  cd "$DIR" || exit 1
+  GITHUB_OUTPUT="$DIR/github_output" bash "$SCRIPT" 'my"app' linux-x64 'my"app' 'v1.2.3"x' 'MIT"quoted' linux x64 'own"er/repo'
+) > "$DIR/stdout" 2> "$DIR/stderr"
+STATUS=$?
+PKG_DIR="$DIR/platforms/my\"app-linux-x64"
+if [[ $STATUS -eq 0 ]] &&
+  jq -e '.name == "my\"app-linux-x64" and .version == "1.2.3\"x" and .license == "MIT\"quoted" and .repository.url == "https://github.com/own\"er/repo"' "$PKG_DIR/package.json" >/dev/null; then
+  pass
+else
+  fail "package.json should stay valid when values need JSON escaping (status=$STATUS err=$(cat "$DIR/stderr"))"
 fi
 
 echo "generate-platform-pkg: $PASS passed, $FAIL failed"

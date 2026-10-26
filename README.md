@@ -150,7 +150,9 @@ Example `npm/package.json`:
 }
 ```
 
-3. **NPM_TOKEN secret** configured in your repository
+3. **License file** in the repository root (`LICENSE`, `LICENSE.md`, `LICENCE`, `COPYING`, or similar), or a `license` field in `npm/package.json`. Each platform package ships a real copy of this file; the workflow fails rather than publishing without one. Use `license-file` if the file lives elsewhere.
+
+4. **NPM_TOKEN secret** configured in your repository
 
 ### For pre-main-publish-script
 
@@ -211,9 +213,23 @@ Publish platform-specific npm packages and a main wrapper package.
 | `npm-package-name` | Yes | - | Full npm package name (e.g., `@scope/myapp`) |
 | `release-tag` | Yes | - | GitHub release tag |
 | `npm-dir` | No | `npm` | Directory containing main package.json |
-| `license` | No | Auto-detect | SPDX license identifier (defaults to repo license) |
+| `license` | No | Auto-detect | SPDX license identifier (see [License detection](#license-detection)) |
+| `license-file` | No | Auto-detect | Path to license file copied into each platform package |
 | `node-version` | No | `lts/*` | Node.js version fallback (see [setup-node](#setup-node)) |
 | `pre-main-publish-script` | No | `""` | Script to run before publishing main package (runs from npm-dir) |
+
+#### License detection
+
+License is resolved in this order:
+
+1. The `license` input, when set.
+2. The `license` field in `<npm-dir>/package.json`.
+3. The `license` field in the repository root `package.json`.
+4. The GitHub API license for the repository.
+
+The `license` field carries details the GitHub API cannot infer, such as `GPL-3.0-or-later` versus `GPL-3.0`, so prefer setting it in `npm-dir/package.json` or passing the input. Empty and `NOASSERTION` values are rejected; there is no MIT default.
+
+Each platform package also receives a real copy (never a symlink) of the repository license file, located by `license-file` or conventional names (`LICENSE`, `LICENSE.md`, `LICENCE`, `COPYING`, and variants). The build fails if no license file is found.
 
 #### Secrets
 

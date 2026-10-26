@@ -18,7 +18,11 @@ on:
         type: string
         default: 'npm'
       license:
-        description: 'SPDX license identifier (defaults to repo license)'
+        description: 'SPDX license identifier (defaults to npm-dir/package.json, then repo package.json, then GitHub API)'
+        type: string
+        default: ''
+      license-file:
+        description: 'Path to license file copied into each platform package (default: auto-detect in repository root)'
         type: string
         default: ''
       node-version:
@@ -65,9 +69,14 @@ jobs:
     name: Detect License
     needs: validate-auth
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       license: ${{ steps.license.outputs.license }}
     steps:
+      # detect-license reads package.json manifests, so the repo must be checked out.
+      - uses: actions/checkout@v6
+
       - uses: bennypowers/go-release-workflows/.github/actions/detect-license@main
         id: license
         env:
@@ -75,6 +84,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           explicit-license: ${{ inputs.license }}
+          npm-dir: ${{ inputs.npm-dir }}
 
   publish-platforms:
     name: Publish Platform Package
@@ -134,6 +144,7 @@ jobs:
           os: ${{ matrix.os }}
           cpu: ${{ matrix.cpu }}
           repository: ${{ github.repository }}
+          license-file: ${{ inputs.license-file }}
 
       # Trusted publishing (OIDC authentication without NPM_TOKEN) requires
       # npm >= 11.5.1. Provenance signing is older, but authentication is not:
@@ -143,8 +154,11 @@ jobs:
       - name: Verify platform package contents
         run: |
           DIR="platforms/${{ inputs.binary-name }}-${{ matrix.platform }}"
+          PLATFORM="${{ matrix.platform }}"
           EXT=""
-          [[ "${{ matrix.platform }}" == win32-* ]] && EXT=".exe"
+          if [[ "$PLATFORM" == win32-* ]]; then
+            EXT=".exe"
+          fi
           EXPECTED="${DIR}/${{ inputs.binary-name }}${EXT}"
           if [[ ! -f "$EXPECTED" ]]; then
             echo "::error::Expected binary not found: $EXPECTED"
@@ -154,6 +168,10 @@ jobs:
           fi
           if [[ ! -f "${DIR}/package.json" ]]; then
             echo "::error::package.json not found in $DIR"
+            exit 1
+          fi
+          if ! compgen -G "${DIR}/LICENSE*" >/dev/null && ! compgen -G "${DIR}/LICENCE*" >/dev/null && ! compgen -G "${DIR}/COPYING*" >/dev/null; then
+            echo "::error::License file not found in $DIR; platform packages must include one"
             exit 1
           fi
           echo "✓ Platform package verified: $(ls "$DIR")"

@@ -26,6 +26,10 @@ inputs:
   repository:
     description: 'GitHub repository (owner/repo)'
     required: true
+  license-file:
+    description: 'Path to license file to copy (default: auto-detect LICENSE/LICENCE/COPYING in the repository root)'
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -39,5 +43,6 @@ runs:
           '${{ inputs.license }}' \
           '${{ inputs.os }}' \
           '${{ inputs.cpu }}' \
-          '${{ inputs.repository }}'
+          '${{ inputs.repository }}' \
+          '${{ inputs.license-file }}'
       shell: bash

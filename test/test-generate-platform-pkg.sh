@@ -176,7 +176,7 @@ new_case empty-auto-license-only
 : > "$DIR/LICENSE"
 run_pkg "$DIR"
 if [[ $STATUS -ne 0 && ! -f "$PKG_DIR/package.json" ]] &&
-  grep -q "No license file found" "$DIR/stderr"; then
+  grep -q "License file is empty" "$DIR/stderr"; then
   pass
 else
   fail "an empty license must not satisfy the license requirement (status=$STATUS err=$(cat "$DIR/stderr"))"

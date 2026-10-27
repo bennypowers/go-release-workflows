@@ -24,8 +24,35 @@ fi
 . "$(dirname "${BASH_SOURCE[0]}")/../lib/license.sh"
 discover_license_file "$LICENSE_FILE" "the main package"
 
-if [[ -f "$NPM_DIR/$LICENSE_NAME" ]]; then
-  echo "License already present in $NPM_DIR: $LICENSE_NAME" >&2
+# The package's own license wins, including a differently named one. Staging a
+# second file would ship two licenses in one tarball, which reads as ambiguous
+# about which one applies.
+EXISTING_NAME=""
+EXISTING_PATH=""
+while IFS= read -r path; do
+  base=$(basename "$path")
+  case "$base" in
+    LICENSE | LICENSE.* | LICENCE | LICENCE.* | COPYING | COPYING.* | \
+      license | license.* | licence | licence.* | copying | copying.*)
+      # Skip empty files: shipping one would be worse than staging ours.
+      [[ -s "$path" ]] || continue
+      EXISTING_NAME="$base"
+      EXISTING_PATH="$path"
+      break
+      ;;
+  esac
+done < <(find "$NPM_DIR" -mindepth 1 -maxdepth 1 ! -type d ! -name '.*' | sort)
+
+if [[ -n "$EXISTING_NAME" ]]; then
+  LICENSE_NAME="$EXISTING_NAME"
+  if [[ -L "$EXISTING_PATH" ]]; then
+    # A symlink dangles for consumers of the tarball; replace it with a copy.
+    rm -f "$EXISTING_PATH"
+    cp "$LICENSE_SRC" "$NPM_DIR/$LICENSE_NAME"
+    echo "Replaced symlinked $NPM_DIR/$LICENSE_NAME with a real file" >&2
+  else
+    echo "License already present in $NPM_DIR: $LICENSE_NAME" >&2
+  fi
 else
   cp "$LICENSE_SRC" "$NPM_DIR/$LICENSE_NAME"
 fi

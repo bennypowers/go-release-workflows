@@ -13,7 +13,7 @@
 # silently shipping one half of a dual license is a compliance bug.
 discover_license_file() {
   local explicit="${1:-}" purpose="${2:-the package}" candidate
-  local -a candidates=()
+  local -a candidates=() empties=()
   LICENSE_SRC=""
   LICENSE_NAME=""
 
@@ -31,13 +31,21 @@ discover_license_file() {
     # Lowercase forms are matched exactly or with an extension (license.md),
     # not by prefix: a file like license-check.js is not a license.
     for candidate in LICENSE* LICENCE* COPYING* license license.* licence licence.* copying copying.*; do
-      if [[ -f "$candidate" && -s "$candidate" ]]; then
-        candidates+=("$candidate")
+      if [[ -f "$candidate" ]]; then
+        if [[ -s "$candidate" ]]; then
+          candidates+=("$candidate")
+        else
+          empties+=("$candidate")
+        fi
       fi
     done
 
     if [[ ${#candidates[@]} -eq 0 ]]; then
-      echo "::error::No license file found in $(pwd); ${purpose} must include one (set the license-file input or add LICENSE to the repository)" >&2
+      if [[ ${#empties[@]} -gt 0 ]]; then
+        printf '::error::License file is empty: %s; %s must ship a non-empty license (write the license text or set the license-file input)\n' "${empties[*]}" "$purpose" >&2
+      else
+        echo "::error::No license file found in $(pwd); ${purpose} must include one (set the license-file input or add LICENSE to the repository)" >&2
+      fi
       return 1
     fi
     if [[ ${#candidates[@]} -gt 1 ]]; then

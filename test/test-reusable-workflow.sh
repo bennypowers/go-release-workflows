@@ -54,7 +54,31 @@ else
   fail "third-party actions must be pinned by full SHA: $unpinned"
 fi
 
-# 4. Simulate a second repository: the caller checks out its own project, not
+# 4. The reusable workflow exposes the same three outputs the action declares,
+# so the documented outputs also work for workflow callers.
+outputs_ok=1
+for out in license license-file platform-packages; do
+  declared=$(yq -r ".on.workflow_call.outputs.\"$out\".value // \"\"" "$WORKFLOW")
+  expected="\${{ jobs.license-lint.outputs.$out }}"
+  if [[ "$declared" != "$expected" ]]; then
+    outputs_ok=0
+    echo "workflow_call output $out maps to '$declared', expected '$expected'" >&2
+  fi
+  job_out=$(yq -r ".jobs.\"license-lint\".outputs.\"$out\" // \"\"" "$WORKFLOW")
+  expected_job="\${{ steps.lint.outputs.$out }}"
+  if [[ "$job_out" != "$expected_job" ]]; then
+    outputs_ok=0
+    echo "job output $out maps to '$job_out', expected '$expected_job'" >&2
+  fi
+done
+step_id=$(yq -r '.jobs["license-lint"].steps[] | select(.id == "lint") | .id' "$WORKFLOW")
+if [[ $outputs_ok -eq 1 && "$step_id" == "lint" ]]; then
+  pass
+else
+  fail "reusable workflow must declare license, license-file, and platform-packages outputs from a step with id 'lint'"
+fi
+
+# 5. Simulate a second repository: the caller checks out its own project, not
 # this repository, so there is no local action tree to resolve.
 CONSUMER="$WORK/consumer"
 mkdir -p "$CONSUMER/.github/workflows" "$CONSUMER/npm"

@@ -50,6 +50,16 @@ on:
         type: string
         required: false
         default: 'lts/*'
+    outputs:
+      license:
+        description: 'SPDX expression the release would publish'
+        value: ${{ jobs.license-lint.outputs.license }}
+      license-file:
+        description: 'Basename of the license file the release would publish'
+        value: ${{ jobs.license-lint.outputs.license-file }}
+      platform-packages:
+        description: 'Number of platform packages checked'
+        value: ${{ jobs.license-lint.outputs.platform-packages }}
 
 permissions:
   contents: read
@@ -58,6 +68,10 @@ jobs:
   license-lint:
     name: License lint
     runs-on: ubuntu-latest
+    outputs:
+      license: ${{ steps.lint.outputs.license }}
+      license-file: ${{ steps.lint.outputs.license-file }}
+      platform-packages: ${{ steps.lint.outputs.platform-packages }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
@@ -69,7 +83,13 @@ jobs:
       # the caller's checkout. Reference the action by its full repository path
       # so external consumers, which do not have this repository's actions in
       # their checkout, still run it.
-      - name: Lint license compliance
+      #
+      # The reference stays on the major tag. `uses` does not accept
+      # expressions, and a reusable workflow does not receive its caller's
+      # github.action_ref, so the action cannot follow a patch tag the caller
+      # pinned. Bump this line with the workflow's major version.
+      - id: lint
+        name: Lint license compliance
         uses: bennypowers/go-release-workflows/.github/actions/license-lint@v2
         with:
           npm-dir: ${{ inputs.npm-dir }}

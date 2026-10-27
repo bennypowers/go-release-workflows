@@ -40,6 +40,12 @@ if [[ "$json" -ne 1 ]]; then
   printf 'app-1.0.0.tgz\n'
   exit 0
 fi
+# Record the contents npm is asked to pack. Tests set FAKE_NPM_RECORD and
+# FAKE_NPM_SOURCE; only the staged temporary package (cwd != source) is
+# recorded, so the assertion is about what the lint action copied.
+if [[ -n "${FAKE_NPM_RECORD:-}" && "$PWD" != "${FAKE_NPM_SOURCE:-}" ]]; then
+  find . -mindepth 1 -print >>"$FAKE_NPM_RECORD"
+fi
 if [[ -f .packfail ]]; then
   cat .packfail >&2
   exit 1
@@ -57,9 +63,16 @@ add_path() {
   first=0
   json_out+="{\"path\":\"$1\"}"
 }
-if [[ -f .packlist ]]; then
-  while IFS= read -r path; do add_path "$path"; done < .packlist
-elif [[ -f .packlist-auto ]]; then
+# The staged temp package does not copy the fake's control files. Fall back to
+# the source package's model of npm's file list, which still describes the
+# project after the license is staged.
+control=.
+if [[ ! -f .packlist && ! -f .packlist-auto && -n "${FAKE_NPM_SOURCE:-}" ]]; then
+  control="$FAKE_NPM_SOURCE"
+fi
+if [[ -f "$control/.packlist" ]]; then
+  while IFS= read -r path; do add_path "$path"; done < "$control/.packlist"
+elif [[ -f "$control/.packlist-auto" ]]; then
   while IFS= read -r -d '' path; do
     path=${path#./}
     [[ "$path" == .* ]] && continue
@@ -81,10 +94,12 @@ run_lint() {
   local platforms_dir="${5:-platforms}" npm_mode="${6:-auto}"
   OUT="$dir/output"
   : > "$OUT"
+  local source_dir
+  source_dir=$(cd "$dir/$npm_dir" 2>/dev/null && pwd) || source_dir="$dir/$npm_dir"
   (
     cd "$dir" || exit 1
-    PATH="$WORK/bin:$PATH" GITHUB_OUTPUT="$OUT" bash "$SCRIPT" \
-      "$npm_dir" "$license_file" "$license" "$platforms_dir" "$npm_mode"
+    PATH="$WORK/bin:$PATH" GITHUB_OUTPUT="$OUT" FAKE_NPM_SOURCE="$source_dir" \
+      bash "$SCRIPT" "$npm_dir" "$license_file" "$license" "$platforms_dir" "$npm_mode"
   ) > "$dir/stdout" 2> "$dir/stderr"
   STATUS=$?
 }
@@ -111,8 +126,8 @@ run_lint_with_path() {
 make_path_without_npm() {
   local dir="$1" cmd path
   mkdir -p "$dir"
-  for cmd in bash cat cp dirname basename env find grep jq mktemp readlink rm \
-    sort stat tar tr; do
+  for cmd in bash cat cp dirname basename env find grep install jq mktemp \
+    readlink rm sort stat tar tr; do
     path=$(type -P "$cmd" 2>/dev/null) || continue
     ln -sf "$path" "$dir/$cmd"
   done
@@ -502,6 +517,84 @@ if [[ $STATUS -ne 0 ]] && grep -q 'publishable' "$DIR/stderr" &&
   pass
 else
   fail "auto mode with a typo'd npm-dir and a publishable root manifest must fail (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 33b. auto mode detects the canonical npm/package.json when a typo'd dir is
+# passed, even when there is no root manifest to inspect.
+new_case auto-typo-npm-dir-canonical
+rm -f "$DIR/package.json"
+run_lint "$DIR" npmx
+if [[ $STATUS -ne 0 ]] && grep -q 'npm/package.json' "$DIR/stderr" &&
+  grep -q 'set npm-dir' "$DIR/stderr"; then
+  pass
+else
+  fail "auto mode with a typo'd npm-dir and a canonical npm/package.json must fail (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 33c. a genuine no-npm repository still passes even when a non-default
+# npm-dir is passed: canonical detection must not invent a package.
+new_case auto-no-npm-nondefault-dir
+rm -rf "$DIR/npm" "$DIR/package.json"
+run_lint "$DIR" npmx
+if [[ $STATUS -eq 0 ]] && grep -q 'linting the repository license only' "$DIR/stderr"; then
+  pass
+else
+  fail "a genuine no-npm repository must pass regardless of npm-dir (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 34. temp staging copies only what npm would pack, never node_modules
+new_case staged-copy-skips-unpacked
+rm "$DIR/npm/.packlist"
+printf 'auto\n' > "$DIR/npm/.packlist-auto"
+mkdir -p "$DIR/npm/node_modules/heavy"
+printf 'blob\n' > "$DIR/npm/node_modules/heavy/blob"
+: > "$DIR/seen"
+export FAKE_NPM_RECORD="$DIR/seen"
+run_lint "$DIR"
+unset FAKE_NPM_RECORD
+if [[ $STATUS -eq 0 ]] && grep -qx 'license-file=LICENSE' "$OUT" &&
+  ! grep -q 'node_modules' "$DIR/seen"; then
+  pass
+else
+  fail "temp staging must not copy node_modules (status=$STATUS copied=$(tr '\n' ' ' < "$DIR/seen") stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 35. a malformed primary manifest is a parse error, not a missing license
+new_case malformed-primary-manifest
+printf '{not json\n' > "$DIR/npm/package.json"
+run_lint "$DIR"
+if [[ $STATUS -ne 0 ]] && grep -q 'Could not parse npm/package.json' "$DIR/stderr" &&
+  ! grep -q 'no SPDX license found' "$DIR/stderr"; then
+  pass
+else
+  fail "a malformed npm-dir manifest must surface the parse error (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 36. the root manifest is consulted only when the package manifest has no
+# license; a malformed one then warns, as detect-license does, instead of
+# silently reporting that no license exists.
+new_case malformed-root-manifest-warns
+printf '{"name":"@scope/app","version":"1.0.0"}\n' > "$DIR/npm/package.json"
+printf '{not json\n' > "$DIR/package.json"
+run_lint "$DIR"
+if [[ $STATUS -ne 0 ]] &&
+  grep -q '::warning::Could not parse package.json' "$DIR/stderr"; then
+  pass
+else
+  fail "a malformed root manifest must warn instead of being swallowed (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 37. a malformed platform manifest is a parse error, not a missing license
+new_case malformed-platform-manifest
+new_platform app-linux-x64
+cp "$DIR/LICENSE" "$DIR/platforms/app-linux-x64/LICENSE"
+printf '{not json\n' > "$DIR/platforms/app-linux-x64/package.json"
+run_lint "$DIR"
+if [[ $STATUS -ne 0 ]] &&
+  grep -q 'Could not parse .*app-linux-x64/package.json' "$DIR/stderr"; then
+  pass
+else
+  fail "a malformed platform manifest must surface the parse error (status=$STATUS stderr=$(cat "$DIR/stderr"))"
 fi
 
 echo "license-lint: $PASS passed, $FAIL failed"

@@ -9,11 +9,13 @@ set -euo pipefail
 # license, and npm packages that would ship without a license file or without
 # listing it in their tarball.
 #
-# The main package check mirrors the release: it stages the license into a
-# temporary copy of npm-dir (the same precedence and symlink handling as
-# stage-license) and then asks npm for that copy's packlist. Packing npm-dir
-# directly would reject the canonical layout, where the license does not exist
-# until stage-license runs at publish time.
+# The main package check mirrors the release: it copies only the files npm
+# would pack, stages the license into that temporary package (the same
+# precedence and symlink handling as stage-license), and then asks npm for the
+# result's packlist. Packing npm-dir directly would reject the canonical
+# layout, where the license does not exist until stage-license runs at publish
+# time; copying the whole directory would drag node_modules and build output
+# into every lint run.
 #
 # Usage:
 #   license-lint.sh [npm-dir] [license-file] [license] [platforms-dir] [npm-mode]
@@ -54,17 +56,24 @@ err() {
   errors=$((errors + 1))
 }
 
+# manifest_license <path>
+# Prints the license value, or nothing when the manifest has none. Returns 2
+# when the file exists but is not valid JSON, which callers report as a parse
+# error rather than as a missing license (mirrors detect-license.sh).
 manifest_license() {
-  local manifest="$1"
+  local manifest="$1" output
   [[ -f "$manifest" ]] || return 0
-  jq -r '
+  if ! output=$(jq -r '
     if (.license | type) == "object" then (.license.type | select(type == "string"))
     elif (.license | type) == "string" then .license
     elif (.licenses | type) == "array" then
       (.licenses[0] | if type == "object" then (.type | select(type == "string")) else empty end)
     else empty
     end
-  ' "$manifest" 2>/dev/null || true
+  ' "$manifest" 2>/dev/null); then
+    return 2
+  fi
+  printf '%s' "$output"
 }
 
 valid_spdx() {
@@ -96,16 +105,30 @@ check_license_value() {
   return 0
 }
 
-# copy_tree <src> <dest>
-# Copies npm-dir into the temporary staging directory, excluding .git, which
-# npm never packs. Falls back to cp when tar is unavailable.
-copy_tree() {
-  local src="$1" dest="$2"
-  if command -v tar >/dev/null 2>&1; then
-    (cd -- "$src" && tar -cf - --exclude=.git .) | (cd -- "$dest" && tar -xf -)
-  else
-    cp -R -- "$src/." "$dest/"
+# copy_packed_tree <src> <dest>
+# Asks npm for the source package's packlist and copies only those files, so a
+# large node_modules or build directory never reaches the temporary package.
+# Entries that do not exist yet are skipped: the license is usually absent
+# until stage-license runs, and it is staged after this copy.
+copy_packed_tree() {
+  local src="$1" dest="$2" packed path target
+  if ! packed=$(packlist "$src"); then
+    return 1
   fi
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    path="${path//\\//}"
+    # npm packlist paths are relative. Skip anything that could escape src.
+    [[ "$path" == /* ]] && continue
+    path="${path#./}"
+    case "/$path/" in
+      */../*) continue ;;
+    esac
+    target="$src/$path"
+    [[ -f "$target" ]] || continue
+    mkdir -p -- "$dest/$(dirname -- "$path")" || return 1
+    cp -p -- "$target" "$dest/$path" || return 1
+  done <<<"$packed"
 }
 
 # packlist_contains <basename> <newline-separated paths>
@@ -187,6 +210,10 @@ if [[ "$NPM_MODE" == "none" ]]; then
   note "npm-mode=none; skipped npm package checks"
 elif [[ -f "$PRIMARY_MANIFEST" ]]; then
   NPM_PACKAGES=1
+elif [[ "$NPM_DIR" != "npm" && ! -f "$PRIMARY_MANIFEST" && -f npm/package.json ]]; then
+  # A typo'd npm-dir must not silently disable the npm checks. The canonical
+  # directory is present even when the repository root has no manifest.
+  err "$PRIMARY_MANIFEST not found, but npm/package.json exists; set npm-dir to npm (or the directory holding the package), or pass npm-mode=none to skip npm checks"
 elif [[ "$NPM_MODE" == "required" ]]; then
   err "$PRIMARY_MANIFEST not found; npm-mode=required needs a package manifest (set npm-dir, pass npm-mode=auto for a repository without npm packages, or npm-mode=none)"
 elif [[ -f package.json ]] &&
@@ -238,18 +265,29 @@ fi
 LICENSE=""
 MANIFEST_LICENSE=""
 ROOT_LICENSE=""
+MANIFEST_PARSE_FAILED=0
 if [[ "$NPM_PACKAGES" -eq 1 ]]; then
-  MANIFEST_LICENSE=$(manifest_license "$PRIMARY_MANIFEST")
+  manifest_status=0
+  MANIFEST_LICENSE=$(manifest_license "$PRIMARY_MANIFEST") || manifest_status=$?
+  if [[ $manifest_status -eq 2 ]]; then
+    err "Could not parse $PRIMARY_MANIFEST as JSON; fix the manifest or pass the license input"
+    MANIFEST_LICENSE=""
+    MANIFEST_PARSE_FAILED=1
+  fi
   if [[ -n "$EXPLICIT_LICENSE" ]]; then
     LICENSE="$EXPLICIT_LICENSE"
     if [[ -n "$MANIFEST_LICENSE" && "$LICENSE" != "$MANIFEST_LICENSE" ]]; then
       err "license input '$LICENSE' does not match $PRIMARY_MANIFEST license '$MANIFEST_LICENSE'; the release would publish one value and the manifest would claim another"
     fi
-  else
+  elif [[ $MANIFEST_PARSE_FAILED -eq 0 ]]; then
     LICENSE="$MANIFEST_LICENSE"
     if [[ -z "$LICENSE" ]]; then
-      ROOT_LICENSE=$(manifest_license package.json)
-      if [[ -n "$ROOT_LICENSE" ]]; then
+      root_status=0
+      ROOT_LICENSE=$(manifest_license package.json) || root_status=$?
+      if [[ $root_status -eq 2 ]]; then
+        echo "::warning::Could not parse package.json as JSON; skipping its license field" >&2
+        ROOT_LICENSE=""
+      elif [[ -n "$ROOT_LICENSE" ]]; then
         LICENSE="$ROOT_LICENSE"
         note "license taken from repository package.json: $LICENSE"
         if [[ "$NPM_DIR" != "." ]]; then
@@ -258,9 +296,17 @@ if [[ "$NPM_PACKAGES" -eq 1 ]]; then
       fi
     fi
   fi
-  check_license_value "$LICENSE" "$PRIMARY_MANIFEST" || true
+  # A parse failure is already reported; do not add "no SPDX license found".
+  if [[ -n "$EXPLICIT_LICENSE" || $MANIFEST_PARSE_FAILED -eq 0 ]]; then
+    check_license_value "$LICENSE" "$PRIMARY_MANIFEST" || true
+  fi
 else
-  ROOT_LICENSE=$(manifest_license package.json)
+  root_status=0
+  ROOT_LICENSE=$(manifest_license package.json) || root_status=$?
+  if [[ $root_status -eq 2 ]]; then
+    echo "::warning::Could not parse package.json as JSON; skipping its license field" >&2
+    ROOT_LICENSE=""
+  fi
   if [[ -n "$EXPLICIT_LICENSE" ]]; then
     LICENSE="$EXPLICIT_LICENSE"
     if [[ -n "$ROOT_LICENSE" && "$LICENSE" != "$ROOT_LICENSE" ]]; then
@@ -279,11 +325,13 @@ fi
 # copy first, exactly as the release will.
 if [[ "$NPM_PACKAGES" -eq 1 && "$LICENSE_RESOLVED" -eq 1 ]]; then
   TMP_NPM=""
-  if ! TMP_NPM=$(mktemp -d "${TMPDIR:-/tmp}/license-lint-npm.XXXXXX"); then
+  if ! command -v npm >/dev/null 2>&1; then
+    err "npm not found; main package needs npm pack to verify its tarball (install Node.js or set npm-mode=none)"
+  elif ! TMP_NPM=$(mktemp -d "${TMPDIR:-/tmp}/license-lint-npm.XXXXXX"); then
     err "could not create a temporary directory to stage the main package license"
   else
-    if ! copy_tree "$NPM_DIR" "$TMP_NPM"; then
-      err "could not copy $NPM_DIR into a temporary directory for npm pack"
+    if ! copy_packed_tree "$NPM_DIR" "$TMP_NPM"; then
+      err "could not copy the files npm packs from $NPM_DIR into a temporary directory"
     elif ! stage_resolved_license "$TMP_NPM" "$MAIN_LICENSE_NAME" "$RESOLVED_LICENSE_SRC" \
       ${RESOLVED_REMOVE_NAMES[@]+"${RESOLVED_REMOVE_NAMES[@]}"}; then
       err "could not stage $MAIN_LICENSE_NAME into the temporary package copy"
@@ -312,8 +360,11 @@ if [[ "$NPM_PACKAGES" -eq 1 && -d "$PLATFORMS_DIR" ]]; then
         err "$pkgdir has no package.json"
         continue
       fi
-      pkg_license=$(jq -r '.license // empty' "$pkg_json" 2>/dev/null || true)
-      if [[ -z "$pkg_license" ]]; then
+      pkg_status=0
+      pkg_license=$(jq -r '.license // empty' "$pkg_json" 2>/dev/null) || pkg_status=$?
+      if [[ $pkg_status -ne 0 ]]; then
+        err "Could not parse $pkg_json as JSON; fix the manifest"
+      elif [[ -z "$pkg_license" ]]; then
         err "$pkg_json has no license field"
       elif [[ -n "$LICENSE" && "$pkg_license" != "$LICENSE" ]]; then
         err "$pkg_json publishes '$pkg_license' but the release publishes '$LICENSE'"

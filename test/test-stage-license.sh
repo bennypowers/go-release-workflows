@@ -23,6 +23,20 @@ run_stage() {
   STATUS=$?
 }
 
+# run_stage_timeout <seconds> <workdir> [npm-dir] [license-file]
+# Like run_stage, but bounds the run so a FIFO license entry cannot hang the
+# suite before the script learns to reject it.
+run_stage_timeout() {
+  local seconds="$1" dir="$2" npm_dir="${3:-npm}" license_file="${4:-}"
+  OUT="$dir/output"
+  : > "$OUT"
+  (
+    cd "$dir" || exit 1
+    GITHUB_OUTPUT="$OUT" timeout -k 2 "$seconds" bash "$SCRIPT" "$npm_dir" "$license_file"
+  ) > "$dir/stdout" 2> "$dir/stderr"
+  STATUS=$?
+}
+
 new_case() {
   init_case "$WORK" "$1"
   mkdir -p "$DIR/npm"
@@ -344,6 +358,106 @@ if [[ $STATUS -ne 0 ]] && grep -q "control characters" "$DIR/stderr"; then
   pass
 else
   fail "a license filename containing a newline must be rejected (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 27. a directory named LICENSE in npm-dir is rejected, not used as a cp target
+# (cp would otherwise exit 0 after writing the staged file inside the directory).
+new_case npm-license-directory
+printf 'MIT License\n' > "$DIR/LICENSE"
+mkdir "$DIR/npm/LICENSE"
+run_stage "$DIR"
+if [[ $STATUS -ne 0 ]] && grep -q "not a regular file" "$DIR/stderr" &&
+  [[ $(find "$DIR/npm" -mindepth 1 -maxdepth 2 | wc -l) -eq 1 ]]; then
+  pass
+else
+  fail "a directory named LICENSE in npm-dir must fail without writing into it (status=$STATUS entries=$(find "$DIR/npm" -mindepth 1 -maxdepth 2) err=$(cat "$DIR/stderr"))"
+fi
+
+# 28. a FIFO named LICENSE in npm-dir is rejected instead of blocking forever.
+# Skip when the platform cannot create one or has no timeout.
+new_case npm-license-fifo
+printf 'MIT License\n' > "$DIR/LICENSE"
+if ! command -v mkfifo >/dev/null 2>&1 || ! command -v timeout >/dev/null 2>&1 ||
+  ! mkfifo "$DIR/npm/LICENSE" 2>/dev/null; then
+  echo "SKIP: mkfifo or timeout unavailable" >&2
+  pass
+else
+  run_stage_timeout 10 "$DIR"
+  if [[ $STATUS -ne 0 && $STATUS -ne 124 ]] &&
+    grep -q "not a regular file" "$DIR/stderr" && [[ -p "$DIR/npm/LICENSE" ]]; then
+    pass
+  else
+    fail "a FIFO named LICENSE in npm-dir must be rejected, not block (status=$STATUS err=$(cat "$DIR/stderr"))"
+  fi
+fi
+
+# 29. the staged license is world-readable, not the 0600 of the mktemp snapshot
+new_case staged-mode
+printf 'MIT License\n' > "$DIR/LICENSE"
+run_stage "$DIR"
+mode=$(stat -c '%a' "$DIR/npm/LICENSE" 2>/dev/null || stat -f '%Lp' "$DIR/npm/LICENSE" 2>/dev/null)
+if [[ $STATUS -eq 0 && "$mode" == "644" ]]; then
+  pass
+else
+  fail "the staged license must be mode 0644 (status=$STATUS mode=$mode)"
+fi
+
+# 30. a dangling root license symlink is diagnosed, not called empty
+new_case root-symlink-dangling
+ln -s "$DIR/legal/MISSING" "$DIR/LICENSE"
+run_stage "$DIR"
+if [[ $STATUS -ne 0 ]] && grep -qi "broken" "$DIR/stderr" &&
+  ! grep -q "License file is empty" "$DIR/stderr"; then
+  pass
+else
+  fail "a dangling root license symlink must be reported as broken (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 31. a root license symlink pointing at a directory is diagnosed
+new_case root-symlink-directory
+mkdir -p "$DIR/legal"
+ln -s legal "$DIR/LICENSE"
+run_stage "$DIR"
+if [[ $STATUS -ne 0 ]] &&
+  grep -q "does not point to a regular file" "$DIR/stderr" &&
+  ! grep -q "License file is empty" "$DIR/stderr"; then
+  pass
+else
+  fail "a root license symlink to a directory must be diagnosed (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 32. a root license symlink loop is diagnosed, not called empty
+new_case root-symlink-loop
+ln -s LICENSE "$DIR/LICENSE"
+run_stage "$DIR"
+if [[ $STATUS -ne 0 ]] && grep -qi "broken" "$DIR/stderr" &&
+  ! grep -q "License file is empty" "$DIR/stderr"; then
+  pass
+else
+  fail "a looping root license symlink must be reported as broken (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 33. an SPDX-suffixed license may carry one conventional extension
+new_case spdx-suffix-extension
+printf 'MIT License\n' > "$DIR/LICENSE-MIT.md"
+run_stage "$DIR"
+if [[ $STATUS -eq 0 && -f "$DIR/npm/LICENSE-MIT.md" ]] &&
+  cmp -s "$DIR/LICENSE-MIT.md" "$DIR/npm/LICENSE-MIT.md" &&
+  grep -qx "license-file=LICENSE-MIT.md" "$OUT"; then
+  pass
+else
+  fail "LICENSE-MIT.md must be discovered and staged (status=$STATUS files=$(ls "$DIR/npm") err=$(cat "$DIR/stderr"))"
+fi
+
+# 34. adding an extension does not let two SPDX licenses slip past ambiguity
+new_case spdx-suffix-extension-ambiguous
+printf 'MIT License\n' > "$DIR/LICENSE-MIT.md"
+printf 'Apache License\n' > "$DIR/LICENSE-APACHE"
+run_stage "$DIR"
+if [[ $STATUS -ne 0 ]] && grep -q "Multiple license files" "$DIR/stderr"; then
+  pass
+else
+  fail "LICENSE-MIT.md plus LICENSE-APACHE must still be ambiguous (status=$STATUS err=$(cat "$DIR/stderr"))"
 fi
 
 echo "stage-license: $PASS passed, $FAIL failed"

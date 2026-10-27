@@ -243,5 +243,44 @@ else
   fail "explicit license-file should choose one candidate (status=$STATUS err=$(cat "$DIR/stderr"))"
 fi
 
+# 17. LICENSE-prefixed non-license files are ignored in favor of a real license
+new_case non-license-prefixes
+printf 'MIT License\n' > "$DIR/LICENSE"
+printf 'header\n' > "$DIR/LICENSE-HEADER.txt"
+printf 'notices\n' > "$DIR/LICENSE-THIRD-PARTY"
+printf 'console.log(1)\n' > "$DIR/LICENSE-check.js"
+run_pkg "$DIR"
+if [[ $STATUS -eq 0 && -f "$PKG_DIR/LICENSE" ]] &&
+  jq -e '.files | index("LICENSE")' "$PKG_DIR/package.json" >/dev/null &&
+  [[ ! -e "$PKG_DIR/LICENSE-HEADER.txt" && ! -e "$PKG_DIR/LICENSE-THIRD-PARTY" &&
+    ! -e "$PKG_DIR/LICENSE-check.js" ]]; then
+  pass
+else
+  fail "LICENSE-prefixed non-license files must be ignored (status=$STATUS files=$(ls "$PKG_DIR" 2>/dev/null) err=$(cat "$DIR/stderr"))"
+fi
+
+# 18. a mixed-case conventional name is discovered
+new_case mixed-case-license
+printf 'MIT License\n' > "$DIR/License.md"
+run_pkg "$DIR"
+if [[ $STATUS -eq 0 && -f "$PKG_DIR/License.md" ]] &&
+  jq -e '.files | index("License.md")' "$PKG_DIR/package.json" >/dev/null; then
+  pass
+else
+  fail "License.md should be discovered (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 19. a hard-linked duplicate inode is not ambiguous
+new_case inode-dedupe
+printf 'MIT License\n' > "$DIR/LICENSE"
+ln "$DIR/LICENSE" "$DIR/Licence"
+run_pkg "$DIR"
+if [[ $STATUS -eq 0 && -f "$PKG_DIR/LICENSE" ]] &&
+  [[ $(find "$PKG_DIR" -mindepth 1 -maxdepth 1 -name 'LICEN*' | wc -l) -eq 1 ]]; then
+  pass
+else
+  fail "a hard-linked default license must not report false ambiguity (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
 echo "generate-platform-pkg: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]

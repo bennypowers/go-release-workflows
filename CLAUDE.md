@@ -20,6 +20,7 @@ bash test/test-action-safety.sh
 bash test/test-detect-license.sh
 bash test/test-generate-platform-pkg.sh
 bash test/test-stage-license.sh
+bash test/test-license-lint.sh
 ```
 
 ## Key Conventions

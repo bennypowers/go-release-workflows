@@ -237,6 +237,36 @@ Each platform package also receives a real copy (never a symlink) of the reposit
 
 Before publishing, the workflow inspects npm's own packlist (`npm pack --dry-run`) for every platform package and for the main package. A license file that would not ship (for example a custom name excluded by the manifest's `files` list) fails the build instead of producing a non-compliant tarball.
 
+#### License lint in your own CI
+
+Publishing catches these problems, but that is the worst moment to find them: the tag is cut and the release stops for a missing license. The `license-lint` action runs the same checks in a normal test workflow, offline and without credentials.
+
+```yaml
+jobs:
+  license-lint:
+    uses: bennypowers/go-release-workflows/.github/workflows/license-lint.yml@v2
+    with:
+      npm-dir: npm
+```
+
+Or use the action directly when you already have a test job:
+
+```yaml
+      - uses: bennypowers/go-release-workflows/.github/actions/license-lint@v2
+        with:
+          npm-dir: npm
+```
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `npm-dir` | No | `npm` | Directory holding the main `package.json` |
+| `license-file` | No | Auto-detect | License file the release publishes |
+| `license` | No | Manifest license | SPDX expression; must match the manifest when both are set |
+| `platforms-dir` | No | `platforms` | Generated platform packages; skipped when absent |
+| `npm` | No | `auto` | `auto` lints npm packages when `npm-dir` has a manifest and otherwise lints the repository license only; `required` fails without a manifest; `none` skips npm checks |
+
+Projects that do not publish npm packages still get value from it: pass `npm: none` (or leave `auto` with no npm directory) and it checks that the repository ships a non-empty, unambiguous license file, and validates the SPDX expression when one is recorded. The outputs are `license`, `license-file`, and `platform-packages`.
+
 #### Secrets
 
 | Secret | Required | Description |

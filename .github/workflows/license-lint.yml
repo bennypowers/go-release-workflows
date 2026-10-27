@@ -1,0 +1,73 @@
+name: License lint
+
+# Reusable workflow for consuming repositories. Add it to CI so a missing or
+# inconsistent license fails a normal test run instead of the release:
+#
+#   jobs:
+#     license-lint:
+#       uses: bennypowers/go-release-workflows/.github/workflows/license-lint.yml@v2
+#       with:
+#         npm-dir: npm
+#
+# It runs the same checks the publish workflow enforces, offline: the license
+# file exists and is non-empty, the main package manifest carries a valid SPDX
+# expression consistent with any explicit license input, the main tarball
+# includes the license, and every generated platform package ships the license
+# as a real file listed in its published tarball.
+
+on:
+  workflow_call:
+    inputs:
+      npm-dir:
+        description: 'Directory holding the main package.json'
+        type: string
+        required: false
+        default: 'npm'
+      license-file:
+        description: 'Path to the license file the release publishes'
+        type: string
+        required: false
+        default: ''
+      license:
+        description: 'SPDX expression; defaults to npm-dir/package.json'
+        type: string
+        required: false
+        default: ''
+      platforms-dir:
+        description: 'Directory holding generated platform packages'
+        type: string
+        required: false
+        default: 'platforms'
+      npm:
+        description: 'auto lints npm packages when present, required fails without them, none skips npm checks'
+        type: string
+        required: false
+        default: 'auto'
+      node-version:
+        description: 'Node.js version used for npm pack checks'
+        type: string
+        required: false
+        default: 'lts/*'
+
+permissions:
+  contents: read
+
+jobs:
+  license-lint:
+    name: License lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Lint license compliance
+        uses: ./.github/actions/license-lint
+        with:
+          npm-dir: ${{ inputs.npm-dir }}
+          license-file: ${{ inputs.license-file }}
+          license: ${{ inputs.license }}
+          platforms-dir: ${{ inputs.platforms-dir }}
+          npm: ${{ inputs.npm }}

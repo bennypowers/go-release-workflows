@@ -13,7 +13,8 @@
 # a license: LICENSE-check.js, LICENSE-HEADER.txt and LICENSE-THIRD-PARTY are
 # tooling and notices, not the package license. Accepted names are:
 #   - LICENSE, LICENCE, COPYING, optionally with .md/.txt/.rst/.html
-#   - LICENSE-<SPDX-id>, for ids in spdx-license-ids.txt and a few short forms
+#   - LICENSE-<SPDX-id>, for ids in spdx-license-ids.txt and a few short forms,
+#     optionally followed by one .md/.txt/.rst/.html extension
 # All matching is case-insensitive. Two names for the same inode (as reported
 # on a case-insensitive filesystem) count once.
 #
@@ -98,6 +99,49 @@ _license_name_control_ok() {
   fi
 }
 
+# _license_check_entry <path>
+# Validates a discovered license entry. Returns:
+#   0  a regular readable non-empty file, or a symlink to one
+#   2  a regular readable file with no text (the caller reports it as empty)
+#   1  a fatal problem, already reported on stderr. Broken symlinks, symlinks
+#      to non-files, and non-regular entries (directory, FIFO, socket, device)
+#      are fatal: leaving them in place would make a later cp write inside a
+#      directory or block forever on a FIFO.
+_license_check_entry() {
+  local path="$1"
+  if [[ -L "$path" ]]; then
+    if [[ ! -e "$path" ]]; then
+      printf '::error::License symlink %s is broken: its target is missing. Replace it with a real license file or remove it.\n' "$path" >&2
+      return 1
+    fi
+    if [[ ! -f "$path" ]]; then
+      printf '::error::License symlink %s does not point to a regular file\n' "$path" >&2
+      return 1
+    fi
+    if [[ ! -r "$path" ]]; then
+      printf '::error::License symlink %s points to an unreadable file\n' "$path" >&2
+      return 1
+    fi
+    if [[ ! -s "$path" ]]; then
+      printf '::error::License symlink %s points to an empty file; write the license text there or remove the symlink\n' "$path" >&2
+      return 1
+    fi
+    return 0
+  fi
+  if [[ ! -f "$path" ]]; then
+    printf '::error::License entry %s is not a regular file; replace it with the license text or remove it\n' "$path" >&2
+    return 1
+  fi
+  if [[ ! -r "$path" ]]; then
+    printf '::error::License file %s is not readable\n' "$path" >&2
+    return 1
+  fi
+  if [[ ! -s "$path" ]]; then
+    return 2
+  fi
+  return 0
+}
+
 # _match_license_name <basename>
 # Returns 0 only for a real conventional license filename.
 _match_license_name() {
@@ -110,6 +154,12 @@ _match_license_name() {
     copying.md | copying.txt | copying.rst | copying.html) return 0 ;;
     license-*) suffix="${lower#license-}" ;;
     *) return 1 ;;
+  esac
+  [[ -n "$suffix" ]] || return 1
+  # Allow one conventional extension after the identifier (LICENSE-MIT.md), but
+  # only the known four: this is what keeps LICENSE-check.js out.
+  case "$suffix" in
+    *.md | *.txt | *.rst | *.html) suffix="${suffix%.*}" ;;
   esac
   [[ -n "$suffix" ]] || return 1
   # The suffix must be an SPDX license id (case-insensitively, because file
@@ -131,7 +181,7 @@ _match_license_name() {
 # silently shipping one half of a dual license is a compliance bug.
 # shellcheck disable=SC2094 # the temp scan file is only deleted after reading
 discover_license_file() {
-  local explicit="${1:-}" purpose="${2:-the package}" list path rel base key
+  local explicit="${1:-}" purpose="${2:-the package}" list path rel base key rc
   local -a candidates=() empties=()
   local seen=" "
   LICENSE_SRC=""
@@ -173,11 +223,16 @@ discover_license_file() {
         esac
         seen="$seen$key "
       fi
-      if [[ -f "$path" && -s "$path" ]]; then
-        candidates+=("$rel")
-      else
-        empties+=("$rel")
-      fi
+      rc=0
+      _license_check_entry "$path" || rc=$?
+      case "$rc" in
+        0) candidates+=("$rel") ;;
+        2) empties+=("$rel") ;;
+        *)
+          rm -f -- "$list"
+          return 1
+          ;;
+      esac
     done <"$list"
     rm -f -- "$list"
 
@@ -216,7 +271,7 @@ discover_license_file() {
 # Fails on a broken, unreadable or empty symlink target, and on scan failure.
 # shellcheck disable=SC2094 # the temp scan file is only deleted after reading
 _collect_package_licenses() {
-  local dir="$1" list path base key target
+  local dir="$1" list path base key target rc
   local seen=" "
   PKG_CANDIDATE_PATHS=()
   PKG_CANDIDATE_NAMES=()
@@ -238,23 +293,7 @@ _collect_package_licenses() {
     PKG_ALL_NAMES+=("$base")
 
     if [[ -L "$path" ]]; then
-      if [[ ! -e "$path" ]]; then
-        printf '::error::License symlink %s is broken: its target is missing. Replace it with a real license file or remove it.\n' "$path" >&2
-        rm -f -- "$list"
-        return 1
-      fi
-      if [[ ! -f "$path" ]]; then
-        printf '::error::License symlink %s does not point to a regular file\n' "$path" >&2
-        rm -f -- "$list"
-        return 1
-      fi
-      if [[ ! -r "$path" ]]; then
-        printf '::error::License symlink %s points to an unreadable file\n' "$path" >&2
-        rm -f -- "$list"
-        return 1
-      fi
-      if [[ ! -s "$path" ]]; then
-        printf '::error::License symlink %s points to an empty file; write the license text there or remove the symlink\n' "$path" >&2
+      if ! _license_check_entry "$path"; then
         rm -f -- "$list"
         return 1
       fi
@@ -276,11 +315,19 @@ _collect_package_licenses() {
       continue
     fi
 
-    [[ -f "$path" ]] || continue
-    if [[ ! -s "$path" ]]; then
-      PKG_EMPTY_NAMES+=("$base")
-      continue
-    fi
+    rc=0
+    _license_check_entry "$path" || rc=$?
+    case "$rc" in
+      2)
+        PKG_EMPTY_NAMES+=("$base")
+        continue
+        ;;
+      0) ;;
+      *)
+        rm -f -- "$list"
+        return 1
+        ;;
+    esac
     key=$(_license_inode_key "$path") || key=""
     if [[ -n "$key" ]]; then
       case "$seen" in
@@ -382,7 +429,15 @@ stage_resolved_license() {
       return 1
     fi
   done
-  if ! cp -- "$tmp" "$dir/$name"; then
+  # install, not cp, fixes the mode: the snapshot came from mktemp (0600), but
+  # a published license must be readable. A directory in the way is an error,
+  # never a place to write a second file.
+  if [[ -d "$dir/$name" ]]; then
+    rm -f -- "$tmp"
+    printf '::error::Could not write license file: %s/%s is a directory; remove it or choose another license name\n' "$dir" "$name" >&2
+    return 1
+  fi
+  if ! install -m 0644 -- "$tmp" "$dir/$name"; then
     rm -f -- "$tmp"
     printf '::error::Could not write license file: %s/%s\n' "$dir" "$name" >&2
     return 1

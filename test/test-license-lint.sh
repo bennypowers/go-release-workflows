@@ -89,14 +89,14 @@ else
   fail "missing license file must fail (status=$STATUS)"
 fi
 
-# 3. empty license file fails
+# 3. empty license file fails with an actionable message
 new_case empty-license
 : > "$DIR/LICENSE"
 run_lint "$DIR"
-if [[ $STATUS -ne 0 ]]; then
+if [[ $STATUS -ne 0 ]] && grep -q 'License file is empty' "$DIR/stderr"; then
   pass
 else
-  fail "empty license file must fail"
+  fail "empty license file must fail naming the empty file (status=$STATUS err=$(cat "$DIR/stderr"))"
 fi
 
 # 4. ambiguous license files fail

@@ -87,7 +87,7 @@ fi
 new_case empty-license
 : > "$DIR/LICENSE"
 run_stage "$DIR"
-if [[ $STATUS -ne 0 ]] && grep -q "No license file found" "$DIR/stderr"; then
+if [[ $STATUS -ne 0 ]] && grep -q "License file is empty" "$DIR/stderr"; then
   pass
 else
   fail "empty license must not be staged (status=$STATUS)"
@@ -125,6 +125,43 @@ if [[ $STATUS -eq 0 && -f "$DIR/npm/LICENSE-APACHE" ]] &&
   pass
 else
   fail "explicit license-file should choose one candidate (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 10. a differently named license already in npm-dir wins over staging the root one
+new_case existing-different-name
+printf 'MIT License\n' > "$DIR/LICENSE"
+printf 'Apache License\n' > "$DIR/npm/LICENCE.md"
+run_stage "$DIR"
+if [[ $STATUS -eq 0 ]] && [[ ! -f "$DIR/npm/LICENSE" ]] &&
+  cmp -s "$DIR/npm/LICENCE.md" <(printf 'Apache License\n') &&
+  grep -qx "license-file=LICENCE.md" "$OUT"; then
+  pass
+else
+  fail "an existing npm-dir license must not be joined by a second one (status=$STATUS files=$(ls "$DIR/npm") out=$(cat "$OUT"))"
+fi
+
+# 11. a symlinked license in npm-dir is replaced with a real file
+new_case symlinked-npm-license
+printf 'MIT License\n' > "$DIR/LICENSE"
+ln -s "$DIR/LICENSE" "$DIR/npm/LICENSE"
+run_stage "$DIR"
+if [[ $STATUS -eq 0 && -f "$DIR/npm/LICENSE" && ! -L "$DIR/npm/LICENSE" ]] &&
+  cmp -s "$DIR/LICENSE" "$DIR/npm/LICENSE"; then
+  pass
+else
+  fail "a symlinked npm-dir license must be replaced by a real copy (status=$STATUS)"
+fi
+
+# 12. an empty license in npm-dir does not suppress staging a real one
+new_case empty-npm-license
+printf 'MIT License\n' > "$DIR/LICENSE"
+: > "$DIR/npm/LICENSE"
+run_stage "$DIR"
+if [[ $STATUS -eq 0 && -s "$DIR/npm/LICENSE" ]] &&
+  cmp -s "$DIR/LICENSE" "$DIR/npm/LICENSE"; then
+  pass
+else
+  fail "an empty npm-dir license must be replaced by the repository license (status=$STATUS)"
 fi
 
 echo "stage-license: $PASS passed, $FAIL failed"

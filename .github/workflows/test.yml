@@ -25,6 +25,7 @@ jobs:
           bash test/test-generate-platform-pkg.sh
           bash test/test-stage-license.sh
           bash test/test-license-lint.sh
+          bash test/test-reusable-workflow.sh
 
       - name: License lint (self-check)
         uses: ./.github/actions/license-lint

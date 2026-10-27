@@ -11,9 +11,11 @@ name: License lint
 #
 # It runs the same checks the publish workflow enforces, offline: the license
 # file exists and is non-empty, the main package manifest carries a valid SPDX
-# expression consistent with any explicit license input, the main tarball
-# includes the license, and every generated platform package ships the license
-# as a real file listed in its published tarball.
+# expression consistent with any explicit license input, and every generated
+# platform package ships the license as a real file listed in its published
+# tarball. The main package check stages the license into a temporary copy of
+# npm-dir before packing, so it validates the canonical release layout where
+# the license does not exist until stage-license runs.
 
 on:
   workflow_call:
@@ -57,14 +59,18 @@ jobs:
     name: License lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ inputs.node-version }}
 
+      # A cross-repository reusable workflow resolves relative paths against
+      # the caller's checkout. Reference the action by its full repository path
+      # so external consumers, which do not have this repository's actions in
+      # their checkout, still run it.
       - name: Lint license compliance
-        uses: ./.github/actions/license-lint
+        uses: bennypowers/go-release-workflows/.github/actions/license-lint@v2
         with:
           npm-dir: ${{ inputs.npm-dir }}
           license-file: ${{ inputs.license-file }}

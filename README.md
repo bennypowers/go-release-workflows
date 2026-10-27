@@ -239,7 +239,7 @@ Before publishing, the workflow inspects npm's own packlist (`npm pack --dry-run
 
 #### License lint in your own CI
 
-Publishing catches these problems, but that is the worst moment to find them: the tag is cut and the release stops for a missing license. The `license-lint` action runs the same checks in a normal test workflow, offline and without credentials.
+Publishing catches these problems, but that is the worst moment to find them: the tag is cut and the release stops for a missing license. The `license-lint` action runs the same checks in a normal test workflow, offline and without credentials. For the main package it stages the license into a temporary copy of `npm-dir` before invoking `npm pack --dry-run`, mirroring the release order, so the canonical layout (where `stage-license` adds the license at publish time) is what gets checked. A failed or non-JSON `npm pack` fails the lint rather than skipping the check.
 
 ```yaml
 jobs:
@@ -263,9 +263,9 @@ Or use the action directly when you already have a test job:
 | `license-file` | No | Auto-detect | License file the release publishes |
 | `license` | No | Manifest license | SPDX expression; must match the manifest when both are set |
 | `platforms-dir` | No | `platforms` | Generated platform packages; skipped when absent |
-| `npm` | No | `auto` | `auto` lints npm packages when `npm-dir` has a manifest and otherwise lints the repository license only; `required` fails without a manifest; `none` skips npm checks |
+| `npm` | No | `auto` | `auto` lints npm packages when `npm-dir` has a manifest and otherwise lints the repository license only; `required` fails without a manifest; `none` skips npm checks. In `auto`, a missing `npm-dir` next to a publishable root `package.json` fails instead of silently skipping, so a typo cannot disable the checks |
 
-Projects that do not publish npm packages still get value from it: pass `npm: none` (or leave `auto` with no npm directory) and it checks that the repository ships a non-empty, unambiguous license file, and validates the SPDX expression when one is recorded. The outputs are `license`, `license-file`, and `platform-packages`.
+Projects that do not publish npm packages still get value from it: pass `npm: none` (or leave `auto` with no npm directory and no publishable root manifest) and it checks that the repository ships a non-empty, unambiguous license file, and validates and matches the SPDX expression when one is recorded. The outputs are `license`, `license-file` (the name the main package would ship), and `platform-packages`.
 
 #### Secrets
 

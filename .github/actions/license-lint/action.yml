@@ -1,5 +1,5 @@
 name: License lint
-description: Fail fast in test workflows when npm packages would publish without a compliant license
+description: Fail fast in test workflows when npm packages would publish without a compliant license (stages the license into a temporary package copy before packing)
 
 inputs:
   npm-dir:

@@ -11,27 +11,67 @@ trap 'rm -rf "$WORK"' EXIT
 # shellcheck source=test/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-# A deterministic stand-in for npm: `npm pack --dry-run --json` emits the paths
-# listed in .packlist in the current directory, so the tests never depend on
-# npm's own packlist rules.
+# A deterministic stand-in for npm. It models the parts of the CLI the lint
+# action relies on: only `pack` is accepted, unknown flags are rejected, and
+# --json emits JSON on stdout and nothing else. .packlist or .packlist-auto
+# supplies the file list; .packfail, .packnonjson and .packwarn exercise the
+# failure and warning paths.
 mkdir -p "$WORK/bin"
 cat > "$WORK/bin/npm" <<'FAKE'
 #!/usr/bin/env bash
+set -euo pipefail
 if [[ "${1:-}" != "pack" ]]; then
-  echo "unexpected npm invocation: $*" >&2
+  echo "npm error: only pack is supported (got: ${1:-})" >&2
   exit 1
 fi
-[[ -f .packlist ]] || { echo "no .packlist" >&2; exit 1; }
-json='[{"files":['
+shift
+json=0
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run | --ignore-scripts) ;;
+    --json) json=1 ;;
+    *)
+      echo "npm error: unknown option: $arg" >&2
+      exit 1
+      ;;
+  esac
+done
+if [[ "$json" -ne 1 ]]; then
+  printf 'app-1.0.0.tgz\n'
+  exit 0
+fi
+if [[ -f .packfail ]]; then
+  cat .packfail >&2
+  exit 1
+fi
+if [[ -f .packnonjson ]]; then
+  printf 'npm notice this is not json\n'
+  exit 0
+fi
+[[ -f .packwarn ]] && cat .packwarn >&2
+json_out='[{"files":['
 first=1
-while IFS= read -r path; do
-  [[ -n "$path" ]] || continue
-  [[ $first -eq 1 ]] || json+=','
+add_path() {
+  [[ -n "$1" ]] || return 0
+  [[ $first -eq 1 ]] || json_out+=','
   first=0
-  json+="{\"path\":\"$path\"}"
-done < .packlist
-json+=']}]'
-printf '%s\n' "$json"
+  json_out+="{\"path\":\"$1\"}"
+}
+if [[ -f .packlist ]]; then
+  while IFS= read -r path; do add_path "$path"; done < .packlist
+elif [[ -f .packlist-auto ]]; then
+  while IFS= read -r -d '' path; do
+    path=${path#./}
+    [[ "$path" == .* ]] && continue
+    [[ -f "$path" ]] || continue
+    add_path "$path"
+  done < <(find . -mindepth 1 -maxdepth 1 -print0)
+else
+  echo "npm error: no .packlist or .packlist-auto" >&2
+  exit 1
+fi
+json_out+=']}]'
+printf '%s\n' "$json_out"
 FAKE
 chmod +x "$WORK/bin/npm"
 
@@ -47,6 +87,35 @@ run_lint() {
       "$npm_dir" "$license_file" "$license" "$platforms_dir" "$npm_mode"
   ) > "$dir/stdout" 2> "$dir/stderr"
   STATUS=$?
+}
+
+# run_lint_with_path <workdir> <path> [npm-dir] [license-file] [license] [platforms-dir] [npm-mode]
+# Used to prove behavior when npm is absent: PATH contains the script's
+# dependencies but deliberately not npm.
+run_lint_with_path() {
+  local dir="$1" path="$2"
+  shift 2
+  local npm_dir="${1:-npm}" license_file="${2:-}" license="${3:-}"
+  local platforms_dir="${4:-platforms}" npm_mode="${5:-auto}"
+  OUT="$dir/output"
+  : > "$OUT"
+  (
+    cd "$dir" || exit 1
+    PATH="$path" GITHUB_OUTPUT="$OUT" /bin/bash "$SCRIPT" \
+      "$npm_dir" "$license_file" "$license" "$platforms_dir" "$npm_mode"
+  ) > "$dir/stdout" 2> "$dir/stderr"
+  STATUS=$?
+}
+
+# make_path_without_npm <dir>
+make_path_without_npm() {
+  local dir="$1" cmd path
+  mkdir -p "$dir"
+  for cmd in bash cat cp dirname basename env find grep jq mktemp readlink rm \
+    sort stat tar tr; do
+    path=$(type -P "$cmd" 2>/dev/null) || continue
+    ln -sf "$path" "$dir/$cmd"
+  done
 }
 
 new_case() {
@@ -267,6 +336,172 @@ if [[ $STATUS -eq 2 ]] && grep -q 'npm-mode must be auto, required, or none' "$D
   pass
 else
   fail "unknown npm-mode must be rejected with exit 2 (status=$STATUS)"
+fi
+
+# 20. the canonical release layout passes: npm-dir has no license yet because
+# stage-license adds it at publish time. Lint must stage a temporary copy
+# before packing, or real npm would never see the license.
+new_case canonical-staged-layout
+rm "$DIR/npm/.packlist"
+printf 'auto\n' > "$DIR/npm/.packlist-auto"
+run_lint "$DIR"
+if [[ $STATUS -eq 0 ]] && grep -qx 'license-file=LICENSE' "$OUT" &&
+  grep -q 'main package tarball includes LICENSE' "$DIR/stderr"; then
+  pass
+else
+  fail "canonical layout without a pre-staged license must pass (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 21. a differently named license in npm-dir wins, matching stage-license
+new_case npm-license-wins
+printf 'Apache License\n' > "$DIR/npm/LICENCE.md"
+rm "$DIR/npm/.packlist"
+printf 'auto\n' > "$DIR/npm/.packlist-auto"
+run_lint "$DIR"
+if [[ $STATUS -eq 0 ]] && grep -qx 'license-file=LICENCE.md' "$OUT" &&
+  grep -q 'main package tarball includes LICENCE.md' "$DIR/stderr"; then
+  pass
+else
+  fail "npm-dir license must win, as it does in stage-license (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 22. a failed npm pack fails the lint with npm's stderr
+new_case pack-failure
+printf 'npm error: EACCES permission denied\n' > "$DIR/npm/.packfail"
+run_lint "$DIR"
+if [[ $STATUS -ne 0 ]] && grep -q 'npm pack failed' "$DIR/stderr" &&
+  grep -q 'EACCES permission denied' "$DIR/stderr"; then
+  pass
+else
+  fail "a failed npm pack must fail with its stderr (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 23. non-JSON npm output fails instead of being treated as an empty packlist
+new_case pack-non-json
+: > "$DIR/npm/.packnonjson"
+run_lint "$DIR"
+if [[ $STATUS -ne 0 ]] && grep -q 'did not return JSON' "$DIR/stderr"; then
+  pass
+else
+  fail "non-JSON npm output must fail (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 24. absolute paths in npm's file list still identify the license
+new_case packlist-absolute
+printf '/some/absolute/prefix/LICENSE\n' > "$DIR/npm/.packlist"
+run_lint "$DIR"
+if [[ $STATUS -eq 0 ]]; then
+  pass
+else
+  fail "absolute packlist paths must match the license (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 25. a successful pack with stderr warnings passes and surfaces the warning
+new_case pack-warnings
+printf 'npm warn deprecated package@1.0.0\n' > "$DIR/npm/.packwarn"
+run_lint "$DIR"
+if [[ $STATUS -eq 0 ]] && grep -q 'npm warn deprecated package@1.0.0' "$DIR/stderr"; then
+  pass
+else
+  fail "npm stderr warnings on success should pass and be shown (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 26. a genuine but empty platforms directory is not an error
+new_case empty-platforms-dir
+mkdir -p "$DIR/platforms"
+run_lint "$DIR"
+if [[ $STATUS -eq 0 ]] && grep -qx 'platform-packages=0' "$OUT"; then
+  pass
+else
+  fail "an empty platforms dir should pass with zero packages (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 27. CRLF license text is non-empty and passes
+new_case crlf-license
+printf 'MIT License\r\n' > "$DIR/LICENSE"
+run_lint "$DIR"
+if [[ $STATUS -eq 0 ]] && grep -qx 'license-file=LICENSE' "$OUT"; then
+  pass
+else
+  fail "a CRLF license file should pass (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 28. mixed-case license filename is discovered
+new_case mixed-case-license
+rm "$DIR/LICENSE"
+printf 'MIT License\n' > "$DIR/License"
+printf 'License\npackage.json\n' > "$DIR/npm/.packlist"
+run_lint "$DIR"
+if [[ $STATUS -eq 0 ]] && grep -qx 'license-file=License' "$OUT"; then
+  pass
+else
+  fail "mixed-case License should be discovered (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 29. a symlinked main license is dereferenced, not rejected like a platform
+new_case main-license-symlink
+mkdir -p "$DIR/legal"
+printf 'Apache License\n' > "$DIR/legal/APACHE"
+ln -s ../legal/APACHE "$DIR/npm/LICENSE"
+run_lint "$DIR"
+if [[ $STATUS -eq 0 ]] && grep -qx 'license-file=LICENSE' "$OUT"; then
+  pass
+else
+  fail "a symlinked main license should be dereferenced (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 30. an explicit license that matches the manifest passes
+new_case explicit-license-match
+run_lint "$DIR" npm "" MIT
+if [[ $STATUS -eq 0 ]] && grep -qx 'license=MIT' "$OUT"; then
+  pass
+else
+  fail "an explicit license matching the manifest should pass (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 31. NOASSERTION without npm is rejected, just as in npm mode
+new_case no-npm-noassertion
+rm -rf "$DIR/npm"
+printf '{"name":"repo","private":true,"license":"NOASSERTION"}\n' > "$DIR/package.json"
+run_lint "$DIR"
+if [[ $STATUS -ne 0 ]] && grep -q 'not a publishable identifier' "$DIR/stderr"; then
+  pass
+else
+  fail "NOASSERTION in no-npm mode must fail (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 31b. explicit-versus-root mismatch is checked without npm too
+new_case no-npm-mismatch
+rm -rf "$DIR/npm"
+printf '{"name":"repo","private":true,"license":"MIT"}\n' > "$DIR/package.json"
+run_lint "$DIR" npm "" Apache-2.0
+if [[ $STATUS -ne 0 ]] && grep -q 'does not match' "$DIR/stderr"; then
+  pass
+else
+  fail "explicit/root license mismatch must fail without npm (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 32. missing npm fails when npm packages are being linted
+new_case missing-npm
+make_path_without_npm "$WORK/no-npm-bin"
+run_lint_with_path "$DIR" "$WORK/no-npm-bin"
+if [[ $STATUS -ne 0 ]] && grep -q 'npm not found' "$DIR/stderr"; then
+  pass
+else
+  fail "missing npm must fail when linting packages (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 33. auto mode does not silently skip when a publishable root manifest points
+# at a typo'd npm-dir
+new_case auto-typo-npm-dir
+rm -rf "$DIR/npm"
+printf '{"name":"repo","version":"1.0.0"}\n' > "$DIR/package.json"
+run_lint "$DIR" npmx
+if [[ $STATUS -ne 0 ]] && grep -q 'publishable' "$DIR/stderr" &&
+  grep -q 'npmx/package.json' "$DIR/stderr"; then
+  pass
+else
+  fail "auto mode with a typo'd npm-dir and a publishable root manifest must fail (status=$STATUS stderr=$(cat "$DIR/stderr"))"
 fi
 
 echo "license-lint: $PASS passed, $FAIL failed"

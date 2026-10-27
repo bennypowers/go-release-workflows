@@ -164,5 +164,187 @@ else
   fail "an empty npm-dir license must be replaced by the repository license (status=$STATUS)"
 fi
 
+# 13. files that merely share a LICENSE prefix are not licenses
+new_case non-license-prefixes
+printf 'MIT License\n' > "$DIR/LICENSE"
+printf 'console.log(1)\n' > "$DIR/LICENSE-check.js"
+printf 'third-party header\n' > "$DIR/LICENSE-HEADER.txt"
+printf 'third-party notices\n' > "$DIR/LICENSE-THIRD-PARTY"
+run_stage "$DIR"
+if [[ $STATUS -eq 0 && -f "$DIR/npm/LICENSE" ]] &&
+  cmp -s "$DIR/LICENSE" "$DIR/npm/LICENSE" &&
+  [[ ! -e "$DIR/npm/LICENSE-check.js" && ! -e "$DIR/npm/LICENSE-HEADER.txt" &&
+    ! -e "$DIR/npm/LICENSE-THIRD-PARTY" ]]; then
+  pass
+else
+  fail "LICENSE-prefixed non-license files must be ignored (status=$STATUS files=$(ls "$DIR/npm") err=$(cat "$DIR/stderr"))"
+fi
+
+# 14. a LICENSE-prefixed non-license file is not staged when no license exists
+new_case only-non-license
+printf 'console.log(1)\n' > "$DIR/LICENSE-check.js"
+run_stage "$DIR"
+if [[ $STATUS -ne 0 && ! -e "$DIR/npm/LICENSE-check.js" ]] &&
+  grep -q "No license file found" "$DIR/stderr"; then
+  pass
+else
+  fail "license-check.js must not satisfy the license requirement (status=$STATUS files=$(ls "$DIR/npm"))"
+fi
+
+# 15. mixed-case conventional names are discovered
+for mixed in License Licence License.md Copying; do
+  new_case "mixed-case-${mixed//./-}"
+  printf 'MIT License\n' > "$DIR/$mixed"
+  run_stage "$DIR"
+  if [[ $STATUS -eq 0 && -f "$DIR/npm/$mixed" ]] &&
+    cmp -s "$DIR/$mixed" "$DIR/npm/$mixed"; then
+    pass
+  else
+    fail "mixed-case $mixed should be discovered (status=$STATUS files=$(ls "$DIR/npm") err=$(cat "$DIR/stderr"))"
+  fi
+done
+
+# 16. the same inode reached through two names is one candidate, not ambiguity.
+# On a case-insensitive filesystem the OS reports one entry; hard links model
+# the duplicate inode on Linux without requiring such a filesystem.
+new_case inode-dedupe-root
+printf 'MIT License\n' > "$DIR/LICENSE"
+ln "$DIR/LICENSE" "$DIR/License"
+run_stage "$DIR"
+if [[ $STATUS -eq 0 ]] && [[ $(find "$DIR/npm" -mindepth 1 -maxdepth 1 | wc -l) -eq 1 ]]; then
+  pass
+else
+  fail "hard-linked LICENSE/License must not report false ambiguity (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 17. the same inode in npm-dir is one candidate, not ambiguity
+new_case inode-dedupe-npm
+printf 'MIT License\n' > "$DIR/LICENSE"
+printf 'Apache License\n' > "$DIR/npm/LICENSE"
+ln "$DIR/npm/LICENSE" "$DIR/npm/Licence"
+run_stage "$DIR"
+if [[ $STATUS -eq 0 ]] &&
+  [[ $(find "$DIR/npm" -mindepth 1 -maxdepth 1 | wc -l) -eq 1 ]] &&
+  cmp -s "$DIR/npm/LICENSE" <(printf 'Apache License\n'); then
+  pass
+else
+  fail "hard-linked npm-dir licenses must collapse to one (status=$STATUS err=$(cat "$DIR/stderr") files=$(ls "$DIR/npm"))"
+fi
+
+# 18. a symlinked npm license keeps its target's text, not the root license's
+new_case symlink-keeps-target
+mkdir -p "$DIR/legal"
+printf 'MIT License\n' > "$DIR/LICENSE"
+printf 'Apache License\n' > "$DIR/legal/APACHE"
+ln -s ../legal/APACHE "$DIR/npm/LICENSE"
+run_stage "$DIR"
+if [[ $STATUS -eq 0 && -f "$DIR/npm/LICENSE" && ! -L "$DIR/npm/LICENSE" ]] &&
+  cmp -s "$DIR/npm/LICENSE" <(printf 'Apache License\n'); then
+  pass
+else
+  fail "a symlinked npm license must keep its target text (status=$STATUS content=$(cat "$DIR/npm/LICENSE" 2>/dev/null) err=$(cat "$DIR/stderr"))"
+fi
+
+# 19. a dangling npm license symlink fails instead of swapping in the root license
+new_case symlink-dangling
+printf 'MIT License\n' > "$DIR/LICENSE"
+ln -s ../legal/MISSING "$DIR/npm/LICENSE"
+run_stage "$DIR"
+if [[ $STATUS -ne 0 ]] && grep -qi "missing\|broken" "$DIR/stderr" &&
+  cmp -s "$DIR/LICENSE" <(printf 'MIT License\n'); then
+  pass
+else
+  fail "a dangling npm license symlink must fail actionably (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 20. a symlink to an empty target fails
+new_case symlink-empty-target
+mkdir -p "$DIR/legal"
+printf 'MIT License\n' > "$DIR/LICENSE"
+: > "$DIR/legal/EMPTY"
+ln -s ../legal/EMPTY "$DIR/npm/LICENSE"
+run_stage "$DIR"
+if [[ $STATUS -ne 0 ]] && grep -q "empty" "$DIR/stderr"; then
+  pass
+else
+  fail "a symlink to an empty license must fail (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 21. an empty differently named npm license is removed when the root license is staged
+new_case empty-different-name-replaced
+printf 'MIT License\n' > "$DIR/LICENSE"
+: > "$DIR/npm/LICENCE.md"
+run_stage "$DIR"
+if [[ $STATUS -eq 0 && -f "$DIR/npm/LICENSE" ]] &&
+  cmp -s "$DIR/npm/LICENSE" "$DIR/LICENSE" &&
+  [[ ! -e "$DIR/npm/LICENCE.md" ]] &&
+  [[ $(find "$DIR/npm" -mindepth 1 -maxdepth 1 | wc -l) -eq 1 ]]; then
+  pass
+else
+  fail "an empty differently named npm license must not be left beside the staged one (status=$STATUS files=$(ls "$DIR/npm"))"
+fi
+
+# 22. more than one non-empty npm license is ambiguous, not first-by-sort
+new_case multiple-npm-licenses
+printf 'MIT License\n' > "$DIR/LICENSE"
+printf 'Apache License\n' > "$DIR/npm/LICENSE"
+printf 'BSD License\n' > "$DIR/npm/LICENCE"
+run_stage "$DIR"
+if [[ $STATUS -ne 0 ]] && grep -q "Multiple license files" "$DIR/stderr"; then
+  pass
+else
+  fail "two non-empty npm licenses must fail rather than pick one (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 23. an explicit license-file wins over an existing npm-dir license
+new_case explicit-wins-over-existing
+mkdir -p "$DIR/legal"
+printf 'MIT License\n' > "$DIR/LICENSE"
+printf 'Apache License\n' > "$DIR/npm/LICENSE"
+printf 'GPL License\n' > "$DIR/legal/COPYING"
+run_stage "$DIR" npm legal/COPYING
+if [[ $STATUS -eq 0 && -f "$DIR/npm/COPYING" && ! -e "$DIR/npm/LICENSE" ]] &&
+  cmp -s "$DIR/npm/COPYING" "$DIR/legal/COPYING" &&
+  [[ $(find "$DIR/npm" -mindepth 1 -maxdepth 1 | wc -l) -eq 1 ]] &&
+  grep -qx "license-file=COPYING" "$OUT"; then
+  pass
+else
+  fail "an explicit license-file must win over an existing npm-dir license (status=$STATUS files=$(ls "$DIR/npm") err=$(cat "$DIR/stderr"))"
+fi
+
+# 24. an explicit license-file with the same name replaces the existing content
+new_case explicit-same-name
+mkdir -p "$DIR/legal"
+printf 'MIT License\n' > "$DIR/LICENSE"
+printf 'Apache License\n' > "$DIR/npm/LICENSE"
+printf 'GPL License\n' > "$DIR/legal/LICENSE"
+run_stage "$DIR" npm legal/LICENSE
+if [[ $STATUS -eq 0 ]] && cmp -s "$DIR/npm/LICENSE" "$DIR/legal/LICENSE" &&
+  [[ $(find "$DIR/npm" -mindepth 1 -maxdepth 1 | wc -l) -eq 1 ]]; then
+  pass
+else
+  fail "an explicit license-file must replace a same-named npm license (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
+# 25. success logging goes to stderr so stdout stays clean
+new_case stderr-logging
+printf 'MIT License\n' > "$DIR/LICENSE"
+run_stage "$DIR"
+if [[ $STATUS -eq 0 && ! -s "$DIR/stdout" ]] && grep -q "Staged" "$DIR/stderr"; then
+  pass
+else
+  fail "success logging must go to stderr (status=$STATUS stdout=$(cat "$DIR/stdout") stderr=$(cat "$DIR/stderr"))"
+fi
+
+# 26. a license filename containing a newline is rejected
+new_case newline-filename
+printf 'MIT License\n' > "$DIR/"$'LICENSE\nX'
+run_stage "$DIR" npm $'LICENSE\nX'
+if [[ $STATUS -ne 0 ]] && grep -q "control characters" "$DIR/stderr"; then
+  pass
+else
+  fail "a license filename containing a newline must be rejected (status=$STATUS err=$(cat "$DIR/stderr"))"
+fi
+
 echo "stage-license: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]

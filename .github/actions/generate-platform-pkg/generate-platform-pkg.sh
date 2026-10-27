@@ -22,7 +22,7 @@ LICENSE_FILE="${9:-}"
 VERSION="${RELEASE_TAG#v}"
 
 PLATFORM_DIR="platforms/${BINARY_NAME}-${PLATFORM}"
-mkdir -p "$PLATFORM_DIR"
+mkdir -p -- "$PLATFORM_DIR"
 
 # Locate the license file: explicit path wins, otherwise exactly one
 # conventional name must exist. Ambiguous candidates are an error.
@@ -31,7 +31,7 @@ mkdir -p "$PLATFORM_DIR"
 discover_license_file "$LICENSE_FILE" "platform packages"
 
 # Real copy, not a symlink: the tarball must remain self-contained.
-cp "$LICENSE_SRC" "$PLATFORM_DIR/$LICENSE_NAME"
+cp -- "$LICENSE_SRC" "$PLATFORM_DIR/$LICENSE_NAME"
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   echo "license-file=$LICENSE_NAME" >> "$GITHUB_OUTPUT"

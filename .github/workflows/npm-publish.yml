@@ -89,9 +89,44 @@ jobs:
           explicit-license: ${{ inputs.license }}
           npm-dir: ${{ inputs.npm-dir }}
 
+  # npm cannot republish a version. Validate the main package's license before
+  # any package ships: two non-empty licenses in npm-dir, a broken symlink, or
+  # a license-file name the manifest's files list excludes must fail here, not
+  # in publish-main after six platform packages are already on the registry.
+  # Staging is repeated in publish-main because staged files do not carry
+  # between jobs; this job only validates.
+  preflight-license:
+    name: Preflight License
+    needs: detect-license
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Validate the same release contents that will be published.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release-tag }}
+
+      - uses: bennypowers/go-release-workflows/.github/actions/setup-node@main
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - uses: bennypowers/go-release-workflows/.github/actions/stage-license@main
+        id: stage
+        with:
+          npm-dir: ${{ inputs.npm-dir }}
+          license-file: ${{ inputs.license-file }}
+
+      - uses: bennypowers/go-release-workflows/.github/actions/verify-license-pack@main
+        with:
+          npm-dir: ${{ inputs.npm-dir }}
+          license-file: ${{ steps.stage.outputs.license-file }}
+
   publish-platforms:
     name: Publish Platform Package
-    needs: detect-license
+    needs:
+      - detect-license
+      - preflight-license
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -246,28 +281,12 @@ jobs:
           VERSION="${RELEASE_TAG#v}"
           npm version "$VERSION" --no-git-tag-version --allow-same-version
 
-      - name: Verify main package license
-        working-directory: ${{ inputs.npm-dir }}
-        env:
-          LICENSE_FILE: ${{ steps.stage.outputs.license-file }}
-        run: |
-          if [[ -z "$LICENSE_FILE" ]]; then
-            echo "::error::stage-license did not report a license file"
-            exit 1
-          fi
-          # Assert on npm's packlist, as the platform verify step does. npm
-          # auto-includes conventional LICENSE/LICENCE/COPYING names, but a
-          # custom license-file name only ships when the manifest's files list
-          # covers it; without this check the wrapper could publish unlicensed.
-          PACK_JSON="$(npm pack --dry-run --json --ignore-scripts)"
-          PACKED="$(jq -r '.[0].files[].path' <<<"$PACK_JSON")"
-          if ! grep -qxF -- "$LICENSE_FILE" <<<"$PACKED"; then
-            echo "::error::License file '${LICENSE_FILE}' is missing from the main package tarball"
-            echo "Packed files:"
-            printf '%s\n' "$PACKED"
-            exit 1
-          fi
-          echo "✓ Main package includes ${LICENSE_FILE}"
+      # Same shared check the preflight runs, so the published contents are
+      # validated again after the version update and pre-publish script.
+      - uses: bennypowers/go-release-workflows/.github/actions/verify-license-pack@main
+        with:
+          npm-dir: ${{ inputs.npm-dir }}
+          license-file: ${{ steps.stage.outputs.license-file }}
 
       - uses: bennypowers/go-release-workflows/.github/actions/npm-publish@main
         env:

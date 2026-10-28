@@ -43,6 +43,14 @@ job_runs() {
   yq -r ".jobs.\"$1\".steps[] | .run // \"\"" "$WORKFLOW"
 }
 
+# job_steps <job>
+# Prints one identity per step, in order: the step name when it has one, else
+# its uses reference. Unlike job_runs and job_uses, this preserves the relative
+# order of heterogeneous steps.
+job_steps() {
+  yq -r ".jobs.\"$1\".steps[] | (.name // .uses // \"\")" "$WORKFLOW"
+}
+
 # 1. The preflight job exists.
 preflight=$(yq -r '.jobs["preflight-license"].name // ""' "$WORKFLOW")
 if [[ -n "$preflight" ]]; then
@@ -125,6 +133,29 @@ if [[ -n "$preflight_script_line" && -n "$preflight_verify_line" ]] &&
   pass
 else
   fail "preflight-license must run pre-main-publish-script before verify-license-pack, and publish-main must still run it"
+fi
+
+# 10b. The preflight must mirror publish-main's version update, after the
+#      pre-publish script and before the packlist check. `npm version` runs the
+#      package's version lifecycle script, which can delete the license or drop
+#      a custom license name from files; validating before it would pass a
+#      package that publish-main then rejects after the platforms shipped.
+preflight_steps=$(job_steps preflight-license)
+stage_step_line=$(grep -n -F 'stage-license@' <<<"$preflight_steps" | cut -d: -f1)
+script_step_line=$(grep -n -F 'Run pre-publish script' <<<"$preflight_steps" | cut -d: -f1)
+version_step_line=$(grep -n -F 'Update version' <<<"$preflight_steps" | cut -d: -f1)
+verify_step_line=$(grep -n -F 'verify-license-pack@' <<<"$preflight_steps" | cut -d: -f1)
+preflight_runs=$(job_runs preflight-license)
+if [[ -n "$stage_step_line" && -n "$script_step_line" &&
+  -n "$version_step_line" && -n "$verify_step_line" ]] &&
+  [[ "$stage_step_line" -lt "$script_step_line" ]] &&
+  [[ "$script_step_line" -lt "$version_step_line" ]] &&
+  [[ "$version_step_line" -lt "$verify_step_line" ]] &&
+  grep -qF 'npm version' <<<"$preflight_runs" &&
+  grep -qF -- '--no-git-tag-version --allow-same-version' <<<"$preflight_runs"; then
+  pass
+else
+  fail "preflight-license must order stage-license, pre-main-publish-script, npm version, verify-license-pack (got: $(tr '\n' '|' <<<"$preflight_steps"))"
 fi
 
 # Behavioral tests share one helper. They use real npm because the whole point
@@ -252,6 +283,28 @@ PREPACK
     pass
   else
     fail "a package named 'files' must parse correctly (status=$VERIFY_STATUS err=$(cat "$WORK/package-named-files/verify.err"))"
+  fi
+
+  # 17. `npm version` runs the package's version lifecycle script. A version
+  #     script that deletes the license must fail the shared check, because the
+  #     preflight now runs npm version before verifying. Without that step the
+  #     preflight would pass and publish-main would fail after the platform
+  #     packages were already published.
+  make_verify_pkg "$WORK/version-script" "@scope/version-script" \
+    '{"version":"rm -f LICENSE"}'
+  cp -R "$WORK/version-script" "$WORK/version-script-run"
+  (
+    cd "$WORK/version-script-run/npm" || exit 1
+    npm version 9.9.9 --no-git-tag-version --allow-same-version
+  ) >"$WORK/version-script-run/version.out" 2>"$WORK/version-script-run/version.err"
+  version_status=$?
+  run_verify "$WORK/version-script-run"
+  if [[ $version_status -eq 0 && $VERIFY_STATUS -ne 0 ]] &&
+    grep -q 'missing from the main package tarball' \
+      "$WORK/version-script-run/verify.err"; then
+    pass
+  else
+    fail "a version lifecycle script that deletes the license must fail verification (version=$version_status verify=$VERIFY_STATUS err=$(cat "$WORK/version-script-run/verify.err"); version err=$(cat "$WORK/version-script-run/version.err"))"
   fi
 fi
 

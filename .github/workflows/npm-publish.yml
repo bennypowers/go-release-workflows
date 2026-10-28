@@ -128,6 +128,19 @@ jobs:
           RELEASE_TAG: ${{ inputs.release-tag }}
         run: ${{ inputs.pre-main-publish-script }} # action-safety: ignore -- caller script by design
 
+      # Mirror publish-main's version update so the package's `version`
+      # lifecycle script runs before the check below. npm runs that script on
+      # `npm version`, and it can delete the license or drop a custom license
+      # name from files. Without this step the preflight would pass and
+      # publish-main would fail after the platform packages were published.
+      - name: Update version
+        working-directory: ${{ inputs.npm-dir }}
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+
       # npm publish --dry-run runs the same lifecycle scripts as the real
       # publish (prepublishOnly, prepack, prepare), which may modify files.
       # This throwaway checkout keeps those mutations out of publish-platforms

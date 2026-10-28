@@ -180,14 +180,16 @@ else
 
   # 13. Lifecycle scripts may write to stdout; the JSON extraction must still
   #     find npm's packlist and pass.
-  make_verify_pkg "$WORK/noisy" "@scope/noisy" '{"prepack":"echo script-output"}'
+  make_verify_pkg "$WORK/noisy" "@scope/noisy" '{"prepack":"echo script-output; echo script-warning >&2"}'
   run_verify "$WORK/noisy"
   if [[ $VERIFY_STATUS -eq 0 ]] &&
     grep -q 'includes LICENSE' "$WORK/noisy/verify.err" &&
-    grep -q 'wrote to stderr' "$WORK/noisy/verify.err"; then
+    grep -q 'script-warning' "$WORK/noisy/verify.err" &&
+    ! grep -q '::warning::' "$WORK/noisy/verify.err" &&
+    ! grep -q 'npm notice' "$WORK/noisy/verify.err"; then
     pass
   else
-    fail "noisy lifecycle stdout must not break packlist parsing and stderr must be surfaced (status=$VERIFY_STATUS err=$(cat "$WORK/noisy/verify.err"))"
+    fail "noisy lifecycle output must parse, surface script warnings plainly, and not annotate npm notices (status=$VERIFY_STATUS err=$(cat "$WORK/noisy/verify.err"))"
   fi
 
   # 14. A pre-main-publish-script that drops a custom license name from the

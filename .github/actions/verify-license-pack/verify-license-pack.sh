@@ -109,11 +109,17 @@ if ! grep -qxF -- "$LICENSE_FILE" <<<"$PACKED"; then
   exit 1
 fi
 
-# A successful publish dry run still sends lifecycle output and npm notices to
-# stderr. Surface them instead of discarding diagnostics, without changing the
-# pass/fail decision.
+# npm writes routine notices (for example "Publishing to ... (dry-run)") to
+# stderr on every successful dry run. Drop those so the success path is quiet
+# unless a lifecycle script actually warned; print what remains plainly, with
+# no workflow annotation. The failure paths above keep the full stderr.
 if [[ -n "$PUBLISH_ERR" ]]; then
-  printf '::warning::npm publish --dry-run in %s wrote to stderr: %s\n' "$NPM_DIR" "$PUBLISH_ERR" >&2
+  PUBLISH_ERR_FILTERED=$(printf '%s\n' "$PUBLISH_ERR" |
+    grep -vE '^[[:space:]]*npm notice([[:space:]]|$)' |
+    sed '/^[[:space:]]*$/d' || true)
+  if [[ -n "$PUBLISH_ERR_FILTERED" ]]; then
+    printf 'npm publish --dry-run in %s wrote to stderr:\n%s\n' "$NPM_DIR" "$PUBLISH_ERR_FILTERED" >&2
+  fi
 fi
 
 echo "✓ Main package includes ${LICENSE_FILE}" >&2

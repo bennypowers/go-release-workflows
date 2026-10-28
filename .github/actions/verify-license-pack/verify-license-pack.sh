@@ -6,8 +6,12 @@ set -euo pipefail
 # but a custom license-file name only ships when the manifest's files list
 # covers it; without this check the wrapper could publish unlicensed.
 #
-# Shared by the pre-publish preflight and publish-main so the two checks cannot
-# drift. It only reads: it never stages or publishes.
+# The check uses `npm publish --dry-run`, not `npm pack --dry-run`: publish also
+# runs prepublishOnly, and prepack/prepare can delete or replace the staged
+# license. Those scripts run here, exactly as they will during the real
+# publish, so the packlist reflects the tarball that would actually ship. They
+# can mutate the working tree; callers that care must run this in a throwaway
+# checkout. It never stages or publishes.
 #
 # Usage: verify-license-pack.sh <npm-dir> <license-file>
 # Example: verify-license-pack.sh npm LICENSE
@@ -36,21 +40,37 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 errfile=$(mktemp "${TMPDIR:-/tmp}/verify-license-pack.XXXXXX") || {
-  echo "::error::could not create a temporary file for npm pack" >&2
+  echo "::error::could not create a temporary file for npm publish" >&2
   exit 1
 }
-if ! PACK_JSON=$(cd -- "$NPM_DIR" && npm pack --dry-run --json --ignore-scripts 2>"$errfile"); then
-  printf '::error::npm pack failed in %s: %s\n' "$NPM_DIR" "$(cat -- "$errfile")" >&2
+if ! PUBLISH_OUT=$(cd -- "$NPM_DIR" && npm publish --dry-run --json 2>"$errfile"); then
+  printf '::error::npm publish --dry-run failed in %s: %s\n' "$NPM_DIR" "$(cat -- "$errfile")" >&2
   rm -f -- "$errfile"
   exit 1
 fi
-if [[ -s "$errfile" ]]; then
-  printf 'npm pack warning in %s: %s\n' "$NPM_DIR" "$(cat -- "$errfile")" >&2
-fi
 rm -f -- "$errfile"
 
-if ! PACKED=$(jq -r '.[0].files[]?.path // empty' <<<"$PACK_JSON"); then
-  printf '::error::npm pack in %s did not return JSON: %s\n' "$NPM_DIR" "${PACK_JSON:-<empty output>}" >&2
+# Lifecycle scripts may write to stdout before npm emits its JSON. npm's root
+# JSON value is a line that is only an opening bracket; nested objects also
+# look like that, so take the first one (script output precedes the JSON).
+# A script that prints a lone bracket of its own makes jq fail below, which
+# reports an error instead of guessing a packlist.
+json_start=$(printf '%s\n' "$PUBLISH_OUT" |
+  awk '/^[[:space:]]*[\[{][[:space:]]*$/ { print NR; exit }')
+if [[ -z "$json_start" ]]; then
+  json_start=$(printf '%s\n' "$PUBLISH_OUT" |
+    awk '/^[[:space:]]*[\[{]/ { print NR; exit }')
+fi
+if [[ -z "$json_start" ]]; then
+  printf '::error::npm publish --dry-run in %s did not return JSON: %s\n' "$NPM_DIR" "${PUBLISH_OUT:-<empty output>}" >&2
+  exit 1
+fi
+PUBLISH_JSON=$(printf '%s\n' "$PUBLISH_OUT" | tail -n +"$json_start")
+
+# npm publish --json keys the result by package name; npm pack --json returns
+# an array. .[] covers both.
+if ! PACKED=$(jq -r '.[] | .files[]?.path // empty' <<<"$PUBLISH_JSON"); then
+  printf '::error::npm publish --dry-run in %s did not return usable JSON: %s\n' "$NPM_DIR" "$PUBLISH_JSON" >&2
   exit 1
 fi
 

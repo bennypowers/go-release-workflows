@@ -249,6 +249,11 @@ if [[ "$NPM_PACKAGES" -eq 1 ]]; then
     if [[ "$RESOLVED_FROM_PACKAGE" -eq 0 ]]; then
       # The main package already uses the repository/explicit license.
       PLATFORM_LICENSE_NAME="$MAIN_LICENSE_NAME"
+    elif [[ ! -d "$PLATFORMS_DIR" ]]; then
+      # Platform checks are skipped when platforms-dir is absent, so do not
+      # require a repository license for packages the release will not build.
+      # PLATFORM_LICENSE_NAME stays empty and is unused in that path.
+      :
     elif discover_license_file "$LICENSE_FILE" "platform packages"; then
       PLATFORM_LICENSE_NAME="$LICENSE_NAME"
       note "platform license file: $LICENSE_SRC -> $PLATFORM_LICENSE_NAME"

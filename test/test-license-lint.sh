@@ -597,5 +597,23 @@ else
   fail "a malformed platform manifest must surface the parse error (status=$STATUS stderr=$(cat "$DIR/stderr"))"
 fi
 
+# 38. A package-owned main license satisfies the lint when there is no
+#     platforms directory and no repository license. Platform checks are
+#     skipped when platforms-dir is absent, so platform license discovery must
+#     be skipped too instead of reporting a missing repository license.
+new_case package-owned-no-platforms
+rm "$DIR/LICENSE"
+printf 'MIT License\n' > "$DIR/npm/LICENSE"
+run_lint "$DIR"
+if [[ $STATUS -eq 0 ]] &&
+  grep -qx 'license-file=LICENSE' "$OUT" &&
+  grep -q 'no platforms directory; skipped platform package checks' "$DIR/stderr" &&
+  ! grep -q 'No license file found' "$DIR/stderr" &&
+  ! grep -q 'platform packages must include' "$DIR/stderr"; then
+  pass
+else
+  fail "a package-owned license without a repository license or platforms dir must pass (status=$STATUS stderr=$(cat "$DIR/stderr"))"
+fi
+
 echo "license-lint: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]

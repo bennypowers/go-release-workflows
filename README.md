@@ -261,6 +261,8 @@ Or use the action directly when you already have a test job:
           npm-dir: npm
 ```
 
+These are the inputs accepted by the action directly:
+
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `npm-dir` | No | `npm` | Directory holding the main `package.json` |
@@ -268,6 +270,12 @@ Or use the action directly when you already have a test job:
 | `license` | No | Manifest license | SPDX expression; must match the manifest when both are set |
 | `platforms-dir` | No | `platforms` | Generated platform packages; skipped when absent |
 | `npm` | No | `auto` | `auto` lints npm packages when `npm-dir` has a manifest and otherwise lints the repository license only; `required` fails without a manifest; `none` skips npm checks. In `auto`, a missing `npm-dir` next to a publishable root `package.json` fails instead of silently skipping, so a typo cannot disable the checks |
+
+The reusable workflow also accepts one workflow-only input. It is not an action input because the workflow calls `actions/setup-node` before invoking the action:
+
+| Workflow-only input | Required | Default | Description |
+|---------------------|----------|---------|-------------|
+| `node-version` | No | `lts/*` | Node.js version passed to `actions/setup-node` before the lint runs |
 
 Projects that do not publish npm packages still get value from it: pass `npm: none` (or leave `auto` with no npm directory and no publishable root manifest) and it checks that the repository ships a non-empty, unambiguous license file, and validates and matches the SPDX expression when one is recorded. The outputs are `license`, `license-file` (the name the main package would ship), and `platform-packages`.
 

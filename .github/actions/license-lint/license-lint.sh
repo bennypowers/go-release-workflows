@@ -17,6 +17,12 @@ set -euo pipefail
 # time; copying the whole directory would drag node_modules and build output
 # into every lint run.
 #
+# Lint is intentionally offline and packs with --ignore-scripts: it validates
+# the license file, SPDX value, and tarball shape, but does not run
+# prepublishOnly/prepack/prepare. The release preflight (npm publish --dry-run)
+# is the authority for lifecycle behavior, including a script that removes the
+# license.
+#
 # Usage:
 #   license-lint.sh [npm-dir] [license-file] [license] [platforms-dir] [npm-mode]
 #
@@ -156,6 +162,9 @@ packlist() {
     echo "::error::license-lint: could not create a temporary file for npm pack" >&2
     return 1
   }
+  # --ignore-scripts keeps lint offline. The release preflight runs the
+  # publish lifecycle with npm publish --dry-run and is the authority for
+  # scripts that add, remove, or rename the license.
   if ! json=$(cd -- "$dir" && npm pack --dry-run --json --ignore-scripts 2>"$errfile"); then
     printf 'npm pack failed in %s: %s\n' "$dir" "$(cat -- "$errfile")" >&2
     rm -f -- "$errfile"

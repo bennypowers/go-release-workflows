@@ -243,6 +243,8 @@ The main package's license checks run in a preflight job before the first platfo
 
 Publishing catches these problems, but that is the worst moment to find them: the tag is cut and the release stops for a missing license. The `license-lint` action runs the same checks in a normal test workflow, offline and without credentials. For the main package it stages the license into a temporary copy of `npm-dir` before invoking `npm pack --dry-run`, mirroring the release order, so the canonical layout (where `stage-license` adds the license at publish time) is what gets checked. A failed or non-JSON `npm pack` fails the lint rather than skipping the check.
 
+License lint packs with `--ignore-scripts` and is intentionally offline: it validates the license file, SPDX value, and tarball shape, but does not run `prepublishOnly`/`prepack`/`prepare`. The release preflight (`npm publish --dry-run`) is the authority for lifecycle behavior, including a script that removes the license.
+
 ```yaml
 jobs:
   license-lint:

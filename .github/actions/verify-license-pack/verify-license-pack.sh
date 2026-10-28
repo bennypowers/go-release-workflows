@@ -67,12 +67,27 @@ if [[ -z "$json_start" ]]; then
 fi
 PUBLISH_JSON=$(printf '%s\n' "$PUBLISH_OUT" | tail -n +"$json_start")
 
+# Lifecycle scripts may print JSON of their own (a prepack can even run this
+# check). jq would consume every JSON value and merge their files arrays, so a
+# stale list could still contain the license while the real tarball omits it.
+# Require exactly one top-level value: npm's publish result.
+json_values=$(jq -s 'length' <<<"$PUBLISH_JSON" 2>/dev/null) || {
+  printf '::error::npm publish --dry-run in %s did not return parsable JSON: %s\n' "$NPM_DIR" "$PUBLISH_JSON" >&2
+  exit 1
+}
+if [[ "$json_values" -ne 1 ]]; then
+  printf '::error::npm publish --dry-run in %s returned %s JSON values; a lifecycle script printed JSON, so the packlist cannot be attributed to the publish. Remove the JSON output from prepublishOnly/prepack/prepare or set ignore-scripts.\n' "$NPM_DIR" "$json_values" >&2
+  exit 1
+fi
+
 # npm versions disagree: publish --json may return an array of package
 # objects, an object keyed by package name, or one bare package object. All
-# three carry files[].
+# three carry files[]. A keyed result for a package literally named "files"
+# also has a top-level "files" key, so take the bare branch only when that
+# value is an array.
 if ! PACKED=$(jq -r '
   if type == "array" then .[]
-  elif has("files") then .
+  elif ((.files? | type) == "array") then .
   else .[]
   end
   | .files[]?.path // empty

@@ -239,6 +239,46 @@ Before publishing, the workflow inspects npm's own packlist for every platform p
 
 The main package's license checks run in a preflight job before the first platform package is published. npm cannot republish a version, so an ambiguous license, a broken symlink, an unpackable license name, or a manifest rewritten by `pre-main-publish-script` fails while the release is still untouched instead of after six platform packages are already on the registry. The preflight runs in its own throwaway checkout, so lifecycle scripts and the pre-publish script cannot modify the packages that are actually published. It validates only; `publish-main` stages the license and runs its own checks again because staged files do not carry between jobs.
 
+#### License lint in your own CI
+
+Publishing catches these problems, but that is the worst moment to find them: the tag is cut and the release stops for a missing license. The `license-lint` action runs the same checks in a normal test workflow, offline and without credentials. For the main package it stages the license into a temporary copy of `npm-dir` before invoking `npm pack --dry-run`, mirroring the release order, so the canonical layout (where `stage-license` adds the license at publish time) is what gets checked. A failed or non-JSON `npm pack` fails the lint rather than skipping the check.
+
+License lint packs with `--ignore-scripts` and is intentionally offline: it validates the license file, SPDX value, and tarball shape, but does not run `prepublishOnly`/`prepack`/`prepare`. The release preflight (`npm publish --dry-run`) is the authority for lifecycle behavior, including a script that removes the license.
+
+```yaml
+jobs:
+  license-lint:
+    uses: bennypowers/go-release-workflows/.github/workflows/license-lint.yml@v2
+    with:
+      npm-dir: npm
+```
+
+Or use the action directly when you already have a test job:
+
+```yaml
+      - uses: bennypowers/go-release-workflows/.github/actions/license-lint@v2
+        with:
+          npm-dir: npm
+```
+
+These are the inputs accepted by the action directly:
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `npm-dir` | No | `npm` | Directory holding the main `package.json` |
+| `license-file` | No | Auto-detect | License file the release publishes |
+| `license` | No | Manifest license | SPDX expression; must match the manifest when both are set |
+| `platforms-dir` | No | `platforms` | Generated platform packages; skipped when absent |
+| `npm` | No | `auto` | `auto` lints npm packages when `npm-dir` has a manifest and otherwise lints the repository license only; `required` fails without a manifest; `none` skips npm checks. In `auto`, a missing `npm-dir` next to a publishable root `package.json` fails instead of silently skipping, so a typo cannot disable the checks |
+
+The reusable workflow also accepts one workflow-only input. It is not an action input because the workflow calls `actions/setup-node` before invoking the action:
+
+| Workflow-only input | Required | Default | Description |
+|---------------------|----------|---------|-------------|
+| `node-version` | No | `lts/*` | Node.js version passed to `actions/setup-node` before the lint runs |
+
+Projects that do not publish npm packages still get value from it: pass `npm: none` (or leave `auto` with no npm directory and no publishable root manifest) and it checks that the repository ships a non-empty, unambiguous license file, and validates and matches the SPDX expression when one is recorded. The outputs are `license`, `license-file` (the name the main package would ship), and `platform-packages`.
+
 #### Secrets
 
 | Secret | Required | Description |

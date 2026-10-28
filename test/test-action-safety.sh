@@ -122,6 +122,31 @@ for workflow in "$ROOT"/.github/workflows/*.yml; do
   fi
 done
 
+# Every script an action invokes through ${{ github.action_path }} is executed
+# directly, so it must be tracked as 100755. A 100644 file only fails at
+# runtime with "Permission denied".
+bad_modes=()
+for action in "$ROOT"/.github/actions/*/action.yml; do
+  [[ -f "$action" ]] || continue
+  action_dir=$(dirname "$action")
+  while IFS= read -r ref; do
+    [[ -n "$ref" ]] || continue
+    script="$action_dir/$ref"
+    entry=$(git -C "$ROOT" ls-files -s -- "$script" 2>/dev/null || true)
+    mode=${entry%% *}
+    if [[ "$mode" != "100755" || ! -x "$script" ]]; then
+      bad_modes+=("${script#"$ROOT"/} (${mode:-not tracked})")
+    fi
+  done < <(grep -oE '\$\{\{ github\.action_path \}\}/[A-Za-z0-9._/-]+\.sh' "$action" |
+    sed 's|.*action_path }}/||')
+done
+
+if [[ ${#bad_modes[@]} -eq 0 ]]; then
+  pass
+else
+  fail "action scripts must be mode 100755 in git and executable on disk: ${bad_modes[*]}"
+fi
+
 if [[ $checked -eq 0 ]]; then
   fail "action-safety: no composite action files found under $ROOT/.github/actions"
 fi

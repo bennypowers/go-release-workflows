@@ -48,6 +48,10 @@ if ! PUBLISH_OUT=$(cd -- "$NPM_DIR" && npm publish --dry-run --json 2>"$errfile"
   rm -f -- "$errfile"
   exit 1
 fi
+PUBLISH_ERR=""
+if [[ -s "$errfile" ]]; then
+  PUBLISH_ERR=$(cat -- "$errfile")
+fi
 rm -f -- "$errfile"
 
 # Lifecycle scripts may write to stdout before npm emits its JSON. npm's root
@@ -72,11 +76,11 @@ PUBLISH_JSON=$(printf '%s\n' "$PUBLISH_OUT" | tail -n +"$json_start")
 # stale list could still contain the license while the real tarball omits it.
 # Require exactly one top-level value: npm's publish result.
 json_values=$(jq -s 'length' <<<"$PUBLISH_JSON" 2>/dev/null) || {
-  printf '::error::npm publish --dry-run in %s did not return parsable JSON: %s\n' "$NPM_DIR" "$PUBLISH_JSON" >&2
+  printf '::error::npm publish --dry-run in %s did not return parsable JSON: %s; npm stderr: %s\n' "$NPM_DIR" "$PUBLISH_JSON" "${PUBLISH_ERR:-<empty>}" >&2
   exit 1
 }
 if [[ "$json_values" -ne 1 ]]; then
-  printf '::error::npm publish --dry-run in %s returned %s JSON values; a lifecycle script printed JSON, so the packlist cannot be attributed to the publish. Remove the JSON output from prepublishOnly/prepack/prepare or set ignore-scripts.\n' "$NPM_DIR" "$json_values" >&2
+  printf '::error::npm publish --dry-run in %s returned %s JSON values; a lifecycle script printed JSON, so the packlist cannot be attributed to the publish. Remove the JSON output from prepublishOnly/prepack/prepare or set ignore-scripts. npm stderr: %s\n' "$NPM_DIR" "$json_values" "${PUBLISH_ERR:-<empty>}" >&2
   exit 1
 fi
 
@@ -92,14 +96,24 @@ if ! PACKED=$(jq -r '
   end
   | .files[]?.path // empty
 ' <<<"$PUBLISH_JSON"); then
-  printf '::error::npm publish --dry-run in %s did not return usable JSON: %s\n' "$NPM_DIR" "$PUBLISH_JSON" >&2
+  printf '::error::npm publish --dry-run in %s did not return usable JSON: %s; npm stderr: %s\n' "$NPM_DIR" "$PUBLISH_JSON" "${PUBLISH_ERR:-<empty>}" >&2
   exit 1
 fi
 
 if ! grep -qxF -- "$LICENSE_FILE" <<<"$PACKED"; then
   echo "::error::License file '$LICENSE_FILE' is missing from the main package tarball" >&2
   printf 'Packed files:\n%s\n' "$PACKED" >&2
+  if [[ -n "$PUBLISH_ERR" ]]; then
+    printf 'npm stderr:\n%s\n' "$PUBLISH_ERR" >&2
+  fi
   exit 1
+fi
+
+# A successful publish dry run still sends lifecycle output and npm notices to
+# stderr. Surface them instead of discarding diagnostics, without changing the
+# pass/fail decision.
+if [[ -n "$PUBLISH_ERR" ]]; then
+  printf '::warning::npm publish --dry-run in %s wrote to stderr: %s\n' "$NPM_DIR" "$PUBLISH_ERR" >&2
 fi
 
 echo "✓ Main package includes ${LICENSE_FILE}" >&2

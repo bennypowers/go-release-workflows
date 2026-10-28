@@ -124,24 +124,51 @@ done
 
 # Every script an action invokes through ${{ github.action_path }} is executed
 # directly, so it must be tracked as 100755. A 100644 file only fails at
-# runtime with "Permission denied".
+# runtime with "Permission denied". Actions use two forms:
+#   "${{ github.action_path }}/x.sh"
+#   ACTION_PATH="${{ github.action_path }}"; "${ACTION_PATH}/x.sh"
 bad_modes=()
+ref_count=0
+variable_ref_count=0
+check_action_script() {
+  local action_dir="$1" ref="$2" script entry mode
+  script="$action_dir/$ref"
+  entry=$(git -C "$ROOT" ls-files -s -- "$script" 2>/dev/null || true)
+  mode=${entry%% *}
+  if [[ "$mode" != "100755" || ! -x "$script" ]]; then
+    bad_modes+=("${script#"$ROOT"/} (${mode:-not tracked})")
+  fi
+}
 for action in "$ROOT"/.github/actions/*/action.yml; do
   [[ -f "$action" ]] || continue
   action_dir=$(dirname "$action")
+
   while IFS= read -r ref; do
     [[ -n "$ref" ]] || continue
-    script="$action_dir/$ref"
-    entry=$(git -C "$ROOT" ls-files -s -- "$script" 2>/dev/null || true)
-    mode=${entry%% *}
-    if [[ "$mode" != "100755" || ! -x "$script" ]]; then
-      bad_modes+=("${script#"$ROOT"/} (${mode:-not tracked})")
-    fi
+    ref_count=$((ref_count + 1))
+    check_action_script "$action_dir" "$ref"
   done < <(grep -oE '\$\{\{ github\.action_path \}\}/[A-Za-z0-9._/-]+\.sh' "$action" |
     sed 's|.*action_path }}/||')
+
+  while IFS= read -r var; do
+    [[ -n "$var" ]] || continue
+    while IFS= read -r ref; do
+      [[ -n "$ref" ]] || continue
+      ref_count=$((ref_count + 1))
+      variable_ref_count=$((variable_ref_count + 1))
+      check_action_script "$action_dir" "$ref"
+    done < <(grep -oE '\$\{'"$var"'\}/[A-Za-z0-9._/-]+\.sh' "$action" |
+      sed "s|.*${var}}/||")
+  done < <(grep -oE '[A-Za-z_][A-Za-z0-9_]*="\$\{\{ github\.action_path \}\}"' "$action" |
+    cut -d= -f1 | tr -d '"')
 done
 
-if [[ ${#bad_modes[@]} -eq 0 ]]; then
+if [[ $ref_count -eq 0 ]]; then
+  fail "action-safety: no action_path script references were found (vacuous mode check)"
+elif [[ $variable_ref_count -eq 0 &&
+  -f "$ROOT/.github/actions/validate-build/action.yml" ]]; then
+  fail "action-safety: the \${ACTION_PATH}/X.sh form was not detected"
+elif [[ ${#bad_modes[@]} -eq 0 ]]; then
   pass
 else
   fail "action scripts must be mode 100755 in git and executable on disk: ${bad_modes[*]}"

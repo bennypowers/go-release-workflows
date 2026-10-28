@@ -183,10 +183,11 @@ else
   make_verify_pkg "$WORK/noisy" "@scope/noisy" '{"prepack":"echo script-output"}'
   run_verify "$WORK/noisy"
   if [[ $VERIFY_STATUS -eq 0 ]] &&
-    grep -q 'includes LICENSE' "$WORK/noisy/verify.err"; then
+    grep -q 'includes LICENSE' "$WORK/noisy/verify.err" &&
+    grep -q 'wrote to stderr' "$WORK/noisy/verify.err"; then
     pass
   else
-    fail "noisy lifecycle stdout must not break packlist parsing (status=$VERIFY_STATUS err=$(cat "$WORK/noisy/verify.err"))"
+    fail "noisy lifecycle stdout must not break packlist parsing and stderr must be surfaced (status=$VERIFY_STATUS err=$(cat "$WORK/noisy/verify.err"))"
   fi
 
   # 14. A pre-main-publish-script that drops a custom license name from the
@@ -227,10 +228,11 @@ PREPACK
   chmod +x "$WORK/script-json/npm/prepack.sh"
   run_verify "$WORK/script-json"
   if [[ $VERIFY_STATUS -ne 0 ]] &&
-    grep -q 'JSON values' "$WORK/script-json/verify.err"; then
+    grep -q 'JSON values' "$WORK/script-json/verify.err" &&
+    grep -q 'npm stderr:' "$WORK/script-json/verify.err"; then
     pass
   else
-    fail "lifecycle JSON must not be merged with the publish packlist (status=$VERIFY_STATUS err=$(cat "$WORK/script-json/verify.err"))"
+    fail "lifecycle JSON must not be merged with the publish packlist and stderr must be included (status=$VERIFY_STATUS err=$(cat "$WORK/script-json/verify.err"))"
   fi
 
   # 16. A package literally named "files" must not be mistaken for a bare

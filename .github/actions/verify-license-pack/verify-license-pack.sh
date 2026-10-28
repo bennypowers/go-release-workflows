@@ -67,9 +67,16 @@ if [[ -z "$json_start" ]]; then
 fi
 PUBLISH_JSON=$(printf '%s\n' "$PUBLISH_OUT" | tail -n +"$json_start")
 
-# npm publish --json keys the result by package name; npm pack --json returns
-# an array. .[] covers both.
-if ! PACKED=$(jq -r '.[] | .files[]?.path // empty' <<<"$PUBLISH_JSON"); then
+# npm versions disagree: publish --json may return an array of package
+# objects, an object keyed by package name, or one bare package object. All
+# three carry files[].
+if ! PACKED=$(jq -r '
+  if type == "array" then .[]
+  elif has("files") then .
+  else .[]
+  end
+  | .files[]?.path // empty
+' <<<"$PUBLISH_JSON"); then
   printf '::error::npm publish --dry-run in %s did not return usable JSON: %s\n' "$NPM_DIR" "$PUBLISH_JSON" >&2
   exit 1
 fi

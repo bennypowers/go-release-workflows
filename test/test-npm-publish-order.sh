@@ -214,6 +214,41 @@ else
   else
     fail "a rewritten manifest that drops the license from files must fail verification (before=$pre_rewrite_status after=$VERIFY_STATUS err=$(cat "$WORK/pre-main/verify.err"))"
   fi
+
+  # 15. A lifecycle script that prints its own JSON packlist must not
+  #     contribute a stale LICENSE entry: only npm's outer publish result may
+  #     supply the file list.
+  make_verify_pkg "$WORK/script-json" "@scope/script-json" '{"prepack":"./prepack.sh"}'
+  cat >"$WORK/script-json/npm/prepack.sh" <<'PREPACK'
+#!/usr/bin/env bash
+node -e 'console.log(JSON.stringify({files:[{path:"LICENSE"}]}, null, 2))'
+rm -f LICENSE
+PREPACK
+  chmod +x "$WORK/script-json/npm/prepack.sh"
+  run_verify "$WORK/script-json"
+  if [[ $VERIFY_STATUS -ne 0 ]] &&
+    grep -q 'JSON values' "$WORK/script-json/verify.err"; then
+    pass
+  else
+    fail "lifecycle JSON must not be merged with the publish packlist (status=$VERIFY_STATUS err=$(cat "$WORK/script-json/verify.err"))"
+  fi
+
+  # 16. A package literally named "files" must not be mistaken for a bare
+  #     package object when npm keys its result by package name.
+  make_verify_pkg "$WORK/package-named-files" "files" '{}'
+  # "files" is a real package; use a version the registry cannot have.
+  (
+    cd "$WORK/package-named-files/npm" || exit 1
+    jq '.version = "999.999.999"' package.json >package.json.tmp &&
+      mv package.json.tmp package.json
+  )
+  run_verify "$WORK/package-named-files"
+  if [[ $VERIFY_STATUS -eq 0 ]] &&
+    grep -q 'includes LICENSE' "$WORK/package-named-files/verify.err"; then
+    pass
+  else
+    fail "a package named 'files' must parse correctly (status=$VERIFY_STATUS err=$(cat "$WORK/package-named-files/verify.err"))"
+  fi
 fi
 
 echo "npm-publish-order: $PASS passed, $FAIL failed"

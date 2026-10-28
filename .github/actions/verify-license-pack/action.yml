@@ -1,0 +1,23 @@
+name: Verify License Pack
+description: Fail when npm's packlist for the main package would omit the staged license file
+
+inputs:
+  npm-dir:
+    description: 'Directory containing the main package.json'
+    required: false
+    default: 'npm'
+  license-file:
+    description: 'Basename reported by stage-license'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - id: verify
+      env:
+        NPM_DIR: ${{ inputs.npm-dir }}
+        LICENSE_FILE: ${{ inputs.license-file }}
+      run: |
+        "${{ github.action_path }}/verify-license-pack.sh" "$NPM_DIR" "$LICENSE_FILE"
+      shell: bash

@@ -237,6 +237,8 @@ Each platform package also receives a real copy (never a symlink) of the reposit
 
 Before publishing, the workflow inspects npm's own packlist (`npm pack --dry-run`) for every platform package and for the main package. A license file that would not ship (for example a custom name excluded by the manifest's `files` list) fails the build instead of producing a non-compliant tarball.
 
+The main package's license checks run in a preflight job before the first platform package is published. npm cannot republish a version, so an ambiguous license, a broken symlink, or an unpackable license name fails while the release is still untouched instead of after six platform packages are already on the registry. The preflight validates only; `publish-main` stages the license again because staged files do not carry between jobs.
+
 #### Secrets
 
 | Secret | Required | Description |

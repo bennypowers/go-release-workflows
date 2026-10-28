@@ -19,6 +19,7 @@ shellcheck .github/actions/*/*.sh test/*.sh
 bash test/test-action-safety.sh
 bash test/test-detect-license.sh
 bash test/test-generate-platform-pkg.sh
+bash test/test-npm-publish-order.sh
 bash test/test-stage-license.sh
 ```
 

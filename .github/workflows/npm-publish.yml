@@ -117,6 +117,21 @@ jobs:
           npm-dir: ${{ inputs.npm-dir }}
           license-file: ${{ inputs.license-file }}
 
+      # The caller's pre-publish script can rewrite package.json, including
+      # its files list, before publish-main verifies it. Run it here too so the
+      # check below validates the post-script package. This job has its own
+      # checkout, so the mutations cannot reach the publishing jobs.
+      - name: Run pre-publish script
+        if: inputs.pre-main-publish-script != ''
+        working-directory: ${{ inputs.npm-dir }}
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: ${{ inputs.pre-main-publish-script }} # action-safety: ignore -- caller script by design
+
+      # npm publish --dry-run runs the same lifecycle scripts as the real
+      # publish (prepublishOnly, prepack, prepare), which may modify files.
+      # This throwaway checkout keeps those mutations out of publish-platforms
+      # and publish-main.
       - uses: bennypowers/go-release-workflows/.github/actions/verify-license-pack@main
         with:
           npm-dir: ${{ inputs.npm-dir }}
@@ -282,7 +297,10 @@ jobs:
           npm version "$VERSION" --no-git-tag-version --allow-same-version
 
       # Same shared check the preflight runs, so the published contents are
-      # validated again after the version update and pre-publish script.
+      # validated again after the version update and pre-publish script. It
+      # runs the publication lifecycle scripts in this workspace; the real
+      # publish runs them again. A script that removes the license fails here,
+      # before npm publish is reached.
       - uses: bennypowers/go-release-workflows/.github/actions/verify-license-pack@main
         with:
           npm-dir: ${{ inputs.npm-dir }}

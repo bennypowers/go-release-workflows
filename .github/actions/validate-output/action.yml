@@ -16,10 +16,10 @@ inputs:
 runs:
   using: composite
   steps:
-    - run: |
-        if [[ '${{ inputs.windows }}' == 'true' ]]; then
-          ${{ github.action_path }}/validate-output.sh '${{ inputs.binary-name }}' '${{ inputs.platform }}' --windows
-        else
-          ${{ github.action_path }}/validate-output.sh '${{ inputs.binary-name }}' '${{ inputs.platform }}'
-        fi
+    - env:
+        BINARY_NAME: ${{ inputs.binary-name }}
+        PLATFORM: ${{ inputs.platform }}
+        WINDOWS: ${{ inputs.windows }}
+      run: |
+        "${{ github.action_path }}/validate-output.sh" "$BINARY_NAME" "$PLATFORM" "$WINDOWS"
       shell: bash

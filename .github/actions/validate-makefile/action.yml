@@ -12,5 +12,9 @@ inputs:
 runs:
   using: composite
   steps:
-    - run: ${{ github.action_path }}/validate-makefile.sh '${{ inputs.platforms }}' '${{ inputs.binary-name }}'
+    - env:
+        PLATFORMS: ${{ inputs.platforms }}
+        BINARY_NAME: ${{ inputs.binary-name }}
+      run: |
+        "${{ github.action_path }}/validate-makefile.sh" "$PLATFORMS" "$BINARY_NAME"
       shell: bash

@@ -1,5 +1,5 @@
 name: Detect License
-description: Detect repository license via GitHub API
+description: Detect repository license (explicit input, package.json, then GitHub API)
 
 inputs:
   repository:
@@ -9,6 +9,10 @@ inputs:
     description: 'Explicit SPDX license identifier (overrides detection)'
     required: false
     default: ''
+  npm-dir:
+    description: 'Directory containing the main package.json'
+    required: false
+    default: 'npm'
 
 outputs:
   license:
@@ -19,5 +23,10 @@ runs:
   using: composite
   steps:
     - id: detect
-      run: ${{ github.action_path }}/detect-license.sh '${{ inputs.repository }}' '${{ inputs.explicit-license }}'
+      env:
+        REPOSITORY: ${{ inputs.repository }}
+        EXPLICIT_LICENSE: ${{ inputs.explicit-license }}
+        NPM_DIR: ${{ inputs.npm-dir }}
+      run: |
+        "${{ github.action_path }}/detect-license.sh" "$REPOSITORY" "$EXPLICIT_LICENSE" "$NPM_DIR"
       shell: bash

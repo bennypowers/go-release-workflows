@@ -135,6 +135,10 @@ Your project must have:
    - `optionalDependencies` for platform packages (workflow generates these)
    - `postinstall` script to install the correct platform binary
 
+   Platform packages are named `<npm-package-name>-<platform>`, so
+   `@scope/myapp` publishes `@scope/myapp-linux-x64` and so on. The binary name
+   does not affect the package name; it may differ from the npm package name.
+
 Example `npm/package.json`:
 ```json
 {
@@ -150,7 +154,9 @@ Example `npm/package.json`:
 }
 ```
 
-3. **NPM_TOKEN secret** configured in your repository
+3. **License file** in the repository root (`LICENSE`, `LICENSE.md`, `LICENCE`, `COPYING`, or similar). Each platform package and the main package ship a real copy of this file; the workflow fails rather than publishing without one. A `license` field in `npm/package.json` is used for license detection but does not replace the file; use `license-file` if the file lives elsewhere.
+
+4. **NPM_TOKEN secret** configured in your repository
 
 ### For pre-main-publish-script
 
@@ -211,9 +217,27 @@ Publish platform-specific npm packages and a main wrapper package.
 | `npm-package-name` | Yes | - | Full npm package name (e.g., `@scope/myapp`) |
 | `release-tag` | Yes | - | GitHub release tag |
 | `npm-dir` | No | `npm` | Directory containing main package.json |
-| `license` | No | Auto-detect | SPDX license identifier (defaults to repo license) |
+| `license` | No | Auto-detect | SPDX license identifier (see [License detection](#license-detection)) |
+| `license-file` | No | Auto-detect | Path to license file copied into each platform package |
 | `node-version` | No | `lts/*` | Node.js version fallback (see [setup-node](#setup-node)) |
 | `pre-main-publish-script` | No | `""` | Script to run before publishing main package (runs from npm-dir) |
+
+#### License detection
+
+License is resolved in this order:
+
+1. The `license` input, when set.
+2. The `license` field in `<npm-dir>/package.json`.
+3. The `license` field in the repository root `package.json`.
+4. The GitHub API license for the repository.
+
+The `license` field carries details the GitHub API cannot infer, such as `GPL-3.0-or-later` versus `GPL-3.0`, so prefer setting it in `npm-dir/package.json` or passing the input. Empty and `NOASSERTION` values are rejected; there is no MIT default.
+
+Each platform package also receives a real copy (never a symlink) of the repository license file, located by `license-file` or conventional names (`LICENSE`, `LICENSE.md`, `LICENCE`, `COPYING`, and variants, matched case-insensitively). The main package receives the same copy before publishing. When `npm-dir` already contains a license, that package-owned license wins; passing `license-file` overrides it, because that names the file explicitly. When more than one license file exists (for example a dual-licensed project), the workflow fails instead of guessing: pass `license-file` to choose. The build fails if no license file is found. A `LICENSE-<SPDX-id>` file counts only when the suffix is a real SPDX identifier, so `LICENSE-check.js` is not mistaken for a license.
+
+Before publishing, the workflow inspects npm's own packlist for every platform package (`npm pack --dry-run`) and for the main package (`npm publish --dry-run`, which runs the same `prepublishOnly`/`prepack`/`prepare` lifecycle scripts as the real publish). A license file that would not ship (for example a custom name excluded by the manifest's `files` list, or one removed by a lifecycle script) fails the build instead of producing a non-compliant tarball.
+
+The main package's license checks run in a preflight job before the first platform package is published. npm cannot republish a version, so an ambiguous license, a broken symlink, an unpackable license name, or a manifest rewritten by `pre-main-publish-script` fails while the release is still untouched instead of after six platform packages are already on the registry. The preflight runs in its own throwaway checkout, so lifecycle scripts and the pre-publish script cannot modify the packages that are actually published. It validates only; `publish-main` stages the license and runs its own checks again because staged files do not carry between jobs.
 
 #### Secrets
 

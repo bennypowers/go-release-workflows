@@ -18,5 +18,9 @@ runs:
   using: composite
   steps:
     - id: collect
-      run: ${{ github.action_path }}/collect-artifacts.sh '${{ inputs.platforms }}' '${{ inputs.binary-name }}'
+      env:
+        PLATFORMS: ${{ inputs.platforms }}
+        BINARY_NAME: ${{ inputs.binary-name }}
+      run: |
+        "${{ github.action_path }}/collect-artifacts.sh" "$PLATFORMS" "$BINARY_NAME"
       shell: bash

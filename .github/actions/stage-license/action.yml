@@ -1,0 +1,28 @@
+name: Stage License
+description: Copy the repository license into the main npm package before publishing
+
+inputs:
+  npm-dir:
+    description: 'Directory containing the main package.json'
+    required: false
+    default: 'npm'
+  license-file:
+    description: 'Path to license file (default: auto-detect LICENSE/LICENCE/COPYING in the repository root)'
+    required: false
+    default: ''
+
+outputs:
+  license-file:
+    description: 'Basename of the license file staged into the npm directory'
+    value: ${{ steps.stage.outputs.license-file }}
+
+runs:
+  using: composite
+  steps:
+    - id: stage
+      env:
+        NPM_DIR: ${{ inputs.npm-dir }}
+        LICENSE_FILE: ${{ inputs.license-file }}
+      run: |
+        "${{ github.action_path }}/stage-license.sh" "$NPM_DIR" "$LICENSE_FILE"
+      shell: bash

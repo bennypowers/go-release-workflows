@@ -26,18 +26,39 @@ inputs:
   repository:
     description: 'GitHub repository (owner/repo)'
     required: true
+  license-file:
+    description: 'Path to license file to copy (default: auto-detect LICENSE/LICENCE/COPYING in the repository root)'
+    required: false
+    default: ''
+
+outputs:
+  license-file:
+    description: 'Basename of the license file copied into the platform package'
+    value: ${{ steps.generate.outputs.license-file }}
 
 runs:
   using: composite
   steps:
-    - run: |
-        ${{ github.action_path }}/generate-platform-pkg.sh \
-          '${{ inputs.binary-name }}' \
-          '${{ inputs.platform }}' \
-          '${{ inputs.npm-package-name }}' \
-          '${{ inputs.release-tag }}' \
-          '${{ inputs.license }}' \
-          '${{ inputs.os }}' \
-          '${{ inputs.cpu }}' \
-          '${{ inputs.repository }}'
+    - id: generate
+      env:
+        BINARY_NAME: ${{ inputs.binary-name }}
+        PLATFORM: ${{ inputs.platform }}
+        NPM_PACKAGE_NAME: ${{ inputs.npm-package-name }}
+        RELEASE_TAG: ${{ inputs.release-tag }}
+        LICENSE: ${{ inputs.license }}
+        PLATFORM_OS: ${{ inputs.os }}
+        PLATFORM_CPU: ${{ inputs.cpu }}
+        REPOSITORY: ${{ inputs.repository }}
+        LICENSE_FILE: ${{ inputs.license-file }}
+      run: |
+        "${{ github.action_path }}/generate-platform-pkg.sh" \
+          "$BINARY_NAME" \
+          "$PLATFORM" \
+          "$NPM_PACKAGE_NAME" \
+          "$RELEASE_TAG" \
+          "$LICENSE" \
+          "$PLATFORM_OS" \
+          "$PLATFORM_CPU" \
+          "$REPOSITORY" \
+          "$LICENSE_FILE"
       shell: bash

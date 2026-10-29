@@ -18,7 +18,11 @@ on:
         type: string
         default: 'npm'
       license:
-        description: 'SPDX license identifier (defaults to repo license)'
+        description: 'SPDX license identifier (defaults to npm-dir/package.json, then repo package.json, then GitHub API)'
+        type: string
+        default: ''
+      license-file:
+        description: 'Path to license file copied into each platform package (default: auto-detect in repository root)'
         type: string
         default: ''
       node-version:
@@ -65,9 +69,17 @@ jobs:
     name: Detect License
     needs: validate-auth
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       license: ${{ steps.license.outputs.license }}
     steps:
+      # detect-license reads package.json manifests, so the repo must be checked out.
+      # Check out the release tag so backfills read the manifest from that release.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release-tag }}
+
       - uses: bennypowers/go-release-workflows/.github/actions/detect-license@main
         id: license
         env:
@@ -75,10 +87,74 @@ jobs:
         with:
           repository: ${{ github.repository }}
           explicit-license: ${{ inputs.license }}
+          npm-dir: ${{ inputs.npm-dir }}
+
+  # npm cannot republish a version. Validate the main package's license before
+  # any package ships: two non-empty licenses in npm-dir, a broken symlink, or
+  # a license-file name the manifest's files list excludes must fail here, not
+  # in publish-main after six platform packages are already on the registry.
+  # Staging is repeated in publish-main because staged files do not carry
+  # between jobs; this job only validates.
+  preflight-license:
+    name: Preflight License
+    needs: detect-license
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Validate the same release contents that will be published.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release-tag }}
+
+      - uses: bennypowers/go-release-workflows/.github/actions/setup-node@main
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - uses: bennypowers/go-release-workflows/.github/actions/stage-license@main
+        id: stage
+        with:
+          npm-dir: ${{ inputs.npm-dir }}
+          license-file: ${{ inputs.license-file }}
+
+      # The caller's pre-publish script can rewrite package.json, including
+      # its files list, before publish-main verifies it. Run it here too so the
+      # check below validates the post-script package. This job has its own
+      # checkout, so the mutations cannot reach the publishing jobs.
+      - name: Run pre-publish script
+        if: inputs.pre-main-publish-script != ''
+        working-directory: ${{ inputs.npm-dir }}
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: ${{ inputs.pre-main-publish-script }} # action-safety: ignore -- caller script by design
+
+      # Mirror publish-main's version update so the package's `version`
+      # lifecycle script runs before the check below. npm runs that script on
+      # `npm version`, and it can delete the license or drop a custom license
+      # name from files. Without this step the preflight would pass and
+      # publish-main would fail after the platform packages were published.
+      - name: Update version
+        working-directory: ${{ inputs.npm-dir }}
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      # npm publish --dry-run runs the same lifecycle scripts as the real
+      # publish (prepublishOnly, prepack, prepare), which may modify files.
+      # This throwaway checkout keeps those mutations out of publish-platforms
+      # and publish-main.
+      - uses: bennypowers/go-release-workflows/.github/actions/verify-license-pack@main
+        with:
+          npm-dir: ${{ inputs.npm-dir }}
+          license-file: ${{ steps.stage.outputs.license-file }}
 
   publish-platforms:
     name: Publish Platform Package
-    needs: detect-license
+    needs:
+      - detect-license
+      - preflight-license
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -106,7 +182,10 @@ jobs:
             os: win32
             cpu: arm64
     steps:
+      # License copy and package manifests must match the release being published.
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release-tag }}
 
       - uses: bennypowers/go-release-workflows/.github/actions/setup-node@main
         with:
@@ -125,6 +204,7 @@ jobs:
           release-tag: ${{ inputs.release-tag }}
 
       - uses: bennypowers/go-release-workflows/.github/actions/generate-platform-pkg@main
+        id: generate
         with:
           binary-name: ${{ inputs.binary-name }}
           platform: ${{ matrix.platform }}
@@ -134,6 +214,7 @@ jobs:
           os: ${{ matrix.os }}
           cpu: ${{ matrix.cpu }}
           repository: ${{ github.repository }}
+          license-file: ${{ inputs.license-file }}
 
       # Trusted publishing (OIDC authentication without NPM_TOKEN) requires
       # npm >= 11.5.1. Provenance signing is older, but authentication is not:
@@ -141,11 +222,17 @@ jobs:
       # ensure-npm-oidc installs an 11.x npm only when the bundled one is too old.
 
       - name: Verify platform package contents
+        env:
+          BINARY_NAME: ${{ inputs.binary-name }}
+          PLATFORM: ${{ matrix.platform }}
+          LICENSE_FILE: ${{ steps.generate.outputs.license-file }}
         run: |
-          DIR="platforms/${{ inputs.binary-name }}-${{ matrix.platform }}"
+          DIR="platforms/${BINARY_NAME}-${PLATFORM}"
           EXT=""
-          [[ "${{ matrix.platform }}" == win32-* ]] && EXT=".exe"
-          EXPECTED="${DIR}/${{ inputs.binary-name }}${EXT}"
+          if [[ "$PLATFORM" == win32-* ]]; then
+            EXT=".exe"
+          fi
+          EXPECTED="${DIR}/${BINARY_NAME}${EXT}"
           if [[ ! -f "$EXPECTED" ]]; then
             echo "::error::Expected binary not found: $EXPECTED"
             echo "Directory contents:"
@@ -154,6 +241,21 @@ jobs:
           fi
           if [[ ! -f "${DIR}/package.json" ]]; then
             echo "::error::package.json not found in $DIR"
+            exit 1
+          fi
+          if [[ -z "$LICENSE_FILE" ]]; then
+            echo "::error::generate-platform-pkg did not report a license file"
+            exit 1
+          fi
+          # Assert on the packed file list rather than the generator's output:
+          # npm's packlist decides what actually ships (it honors files,
+          # .npmignore, and the license auto-include rules).
+          PACK_JSON="$(cd "$DIR" && npm pack --dry-run --json --ignore-scripts)"
+          PACKED="$(jq -r '.[0].files[].path' <<<"$PACK_JSON")"
+          if ! grep -qxF -- "$LICENSE_FILE" <<<"$PACKED"; then
+            echo "::error::License file '${LICENSE_FILE}' is missing from the package tarball"
+            echo "Packed files:"
+            printf '%s\n' "$PACKED"
             exit 1
           fi
           echo "✓ Platform package verified: $(ls "$DIR")"
@@ -173,7 +275,10 @@ jobs:
       contents: read
       id-token: write
     steps:
+      # Package contents must match the release being published.
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release-tag }}
 
       - uses: bennypowers/go-release-workflows/.github/actions/setup-node@main
         with:
@@ -183,12 +288,18 @@ jobs:
       - uses: bennypowers/go-release-workflows/.github/actions/ensure-npm-oidc@main
         if: inputs.provenance
 
+      - uses: bennypowers/go-release-workflows/.github/actions/stage-license@main
+        id: stage
+        with:
+          npm-dir: ${{ inputs.npm-dir }}
+          license-file: ${{ inputs.license-file }}
+
       - name: Run pre-publish script
         if: inputs.pre-main-publish-script != ''
         working-directory: ${{ inputs.npm-dir }}
         env:
           RELEASE_TAG: ${{ inputs.release-tag }}
-        run: ${{ inputs.pre-main-publish-script }}
+        run: ${{ inputs.pre-main-publish-script }} # action-safety: ignore -- caller script by design
 
       - name: Update version
         working-directory: ${{ inputs.npm-dir }}
@@ -197,6 +308,16 @@ jobs:
         run: |
           VERSION="${RELEASE_TAG#v}"
           npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      # Same shared check the preflight runs, so the published contents are
+      # validated again after the version update and pre-publish script. It
+      # runs the publication lifecycle scripts in this workspace; the real
+      # publish runs them again. A script that removes the license fails here,
+      # before npm publish is reached.
+      - uses: bennypowers/go-release-workflows/.github/actions/verify-license-pack@main
+        with:
+          npm-dir: ${{ inputs.npm-dir }}
+          license-file: ${{ steps.stage.outputs.license-file }}
 
       - uses: bennypowers/go-release-workflows/.github/actions/npm-publish@main
         env:

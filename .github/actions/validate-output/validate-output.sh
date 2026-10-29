@@ -2,15 +2,16 @@
 set -euo pipefail
 
 # Validate that the build produced the expected binary
-# Usage: validate-output.sh <binary-name> <platform> [--windows]
+# Usage: validate-output.sh <binary-name> <platform> [--windows|true]
 # Example: validate-output.sh myapp linux-x64
 # Example: validate-output.sh myapp win32-x64 --windows
+# Example: validate-output.sh myapp win32-x64 true
 
 BINARY_NAME="$1"
 PLATFORM="$2"
 WINDOWS="${3:-}"
 
-if [[ "$WINDOWS" == "--windows" ]]; then
+if [[ "$WINDOWS" == "--windows" || "$WINDOWS" == "true" ]]; then
   EXPECTED="dist/bin/${BINARY_NAME}-${PLATFORM}.exe"
 else
   EXPECTED="dist/bin/${BINARY_NAME}-${PLATFORM}"

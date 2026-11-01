@@ -1,0 +1,54 @@
+name: License lint
+description: Fail fast in test workflows when npm packages would publish without a compliant license (stages the license into a temporary package copy before packing)
+
+inputs:
+  npm-dir:
+    description: 'Directory holding the main package.json'
+    required: false
+    default: 'npm'
+  license-file:
+    description: 'Path to the license file the release publishes (default: auto-detect LICENSE/LICENCE/COPYING in the repository root)'
+    required: false
+    default: ''
+  license:
+    description: 'SPDX expression the release publishes (default: the license field in npm-dir/package.json)'
+    required: false
+    default: ''
+  platforms-dir:
+    description: 'Directory holding generated platform packages; skipped when absent'
+    required: false
+    default: 'platforms'
+  npm:
+    description: 'auto lints npm packages when npm-dir has a package.json and otherwise lints the repository license only; required fails without a package manifest; none skips npm checks'
+    required: false
+    default: 'auto'
+
+outputs:
+  license:
+    description: 'SPDX expression the release would publish'
+    value: ${{ steps.lint.outputs.license }}
+  license-file:
+    description: 'Basename of the license file the release would publish'
+    value: ${{ steps.lint.outputs.license-file }}
+  platform-packages:
+    description: 'Number of platform packages checked'
+    value: ${{ steps.lint.outputs.platform-packages }}
+
+runs:
+  using: composite
+  steps:
+    - id: lint
+      env:
+        NPM_DIR: ${{ inputs.npm-dir }}
+        LICENSE_FILE: ${{ inputs.license-file }}
+        EXPLICIT_LICENSE: ${{ inputs.license }}
+        PLATFORMS_DIR: ${{ inputs.platforms-dir }}
+        NPM_MODE: ${{ inputs.npm }}
+      run: |
+        "${{ github.action_path }}/license-lint.sh" \
+          "$NPM_DIR" \
+          "$LICENSE_FILE" \
+          "$EXPLICIT_LICENSE" \
+          "$PLATFORMS_DIR" \
+          "$NPM_MODE"
+      shell: bash
